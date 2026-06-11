@@ -92,6 +92,63 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+## 🤖 OpenClaw Integration
+
+This bot can be integrated directly into your **OpenClaw** multi-agent setup either as a dedicated agent or as a skill (radar tool) for an existing agent.
+
+### Option A: Standalone OpenClaw Agent
+To spawn a new OpenClaw agent dedicated to Reddit marketing:
+
+1. **Create the Telegram Bot**: Use [@BotFather](https://t.me/BotFather) to create a new bot and copy the bot token.
+2. **Update `openclaw.json`**:
+   Add the agent configuration, binding, and Telegram credentials to your master `openclaw.json` file:
+   ```json
+   // 1. Under agents.list:
+   {
+     "id": "reddit_marketer",
+     "name": "RedditMarketer",
+     "workspace": "/home/node/.openclaw/workspace-reddit_marketer",
+     "model": { "primary": "google/gemini-2.5-flash" }
+   }
+
+   // 2. Under bindings:
+   { 
+     "agentId": "reddit_marketer", 
+     "match": { "channel": "telegram", "accountId": "reddit_marketer" } 
+   }
+
+   // 3. Under channels.telegram.accounts:
+   "reddit_marketer": {
+     "botToken": "YOUR_TELEGRAM_BOT_TOKEN_HERE",
+     "dmPolicy": "pairing"
+   }
+   ```
+3. **Deploy Workspace Files**:
+   Create the workspace directory on the VPS and sync `main.py`, `telegram_listener.py`, and `requirements.txt`:
+   ```bash
+   mkdir -p /home/node/.openclaw/workspace-reddit_marketer/skills
+   ```
+4. **Deploy Agent Persona (`SOUL.md`)**:
+   Create a `SOUL.md` in `/home/node/.openclaw/workspace-reddit_marketer/` explaining the agent's persona, deepseek scoring, and goals.
+5. **Fix Permissions & Restart**:
+   ```bash
+   chown -R 1000:1000 /home/node/.openclaw/workspace-reddit_marketer/
+   docker compose restart openclaw-gateway
+   ```
+6. **Pair Bot**: Message the bot on Telegram and approve the pairing code.
+
+---
+
+### Option B: Integrate as a Skill for an Existing Agent
+To add this capability to an existing agent (e.g. `Axel` or `Planck`):
+
+1. **Create Skill Folder**: Inside the agent's workspace directory, create:
+   `skills/reddit-marketing/`
+2. **Deploy Code**: Save the scanning script (`main.py`) in the agent's workspace.
+3. **Write `SKILL.md`**: Create `skills/reddit-marketing/SKILL.md` containing instructions for the agent on when to run the script and how to process the output.
+
+---
+
 ## Swapping the LLM
 
 The brain uses the OpenAI-compatible SDK, so any compatible endpoint works —
