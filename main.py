@@ -8,6 +8,7 @@ import json
 import os
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 
 import praw
@@ -122,7 +123,7 @@ def fetch_rss_feed(session, url: str, source_label: str, cutoff) -> list[dict]:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     try:
-        r = session.get(url, headers=headers, timeout=15)
+        r = session.get(url, headers=headers, timeout=8)
         if r.status_code != 200:
             print(f"  [error] RSS fetch failed for {source_label} (Status: {r.status_code})")
             return []
@@ -185,30 +186,27 @@ def fetch_rss_feed(session, url: str, source_label: str, cutoff) -> list[dict]:
     return results
 
 def fetch_new_posts() -> list[dict]:
-    """Fetch new posts from subreddits and keyword searches via public RSS feeds."""
+    """Fetch posts from subreddits + keyword searches via RSS, in parallel."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
     session = requests.Session()
-    
-    posts = []
-    seen_ids = set()
 
-    # Fetch from subreddits
-    for sub in SUBREDDITS:
-        print(f"  Fetching r/{sub} RSS...")
-        url = f"https://www.reddit.com/r/{sub}/new/.rss"
-        results = fetch_rss_feed(session, url, f"r/{sub}", cutoff)
-        for post in results:
-            if post["id"] not in seen_ids:
-                seen_ids.add(post["id"])
-                posts.append(post)
+    # Build the list of feeds to fetch.
+    feeds = [
+        (f"https://www.reddit.com/r/{sub}/new/.rss", f"r/{sub}")
+        for sub in SUBREDDITS
+    ] + [
+        (f"https://www.reddit.com/search.rss?q={urllib.parse.quote(kw)}&sort=new",
+         f"search: {kw}")
+        for kw in KEYWORDS
+    ]
 
-    # Fetch from keyword searches
-    for kw in KEYWORDS:
-        print(f"  Searching '{kw}' RSS...")
-        encoded_kw = urllib.parse.quote(kw)
-        url = f"https://www.reddit.com/search.rss?q={encoded_kw}&sort=new"
-        results = fetch_rss_feed(session, url, f"search: {kw}", cutoff)
-        for post in results:
+    # Fetch them all concurrently (11 calls -> bounded by the slowest, not the sum).
+    posts, seen_ids = [], set()
+    with ThreadPoolExecutor(max_workers=len(feeds)) as pool:
+        results = pool.map(lambda f: fetch_rss_feed(session, f[0], f[1], cutoff), feeds)
+
+    for feed_results in results:
+        for post in feed_results:
             if post["id"] not in seen_ids:
                 seen_ids.add(post["id"])
                 posts.append(post)
@@ -298,11 +296,13 @@ def main():
     print(f"  Fetched {len(posts)} posts from Reddit")
 
     leads_sent = 0
+    scored = 0
     for post in posts:
         if is_seen(conn, post["id"]):
             print(f"  Skip (seen): {post['id']}")
             continue
 
+        scored += 1
         print(f"  Scoring: [{post['id']}] {post['title'][:60]}...")
         result = score_post(ai, post)
 
@@ -328,6 +328,17 @@ def main():
             mark_seen(conn, post["id"], score, draft, post["url"], "skipped")
 
     print(f"  Done. {leads_sent} lead(s) sent to Telegram.\n")
+
+    # Completion ping (so backgrounded/button runs report back).
+    summary = (
+        f"🔍 <b>Reddit scan done</b>\n"
+        f"Fetched {len(posts)} · scored {scored} new · "
+        f"<b>{leads_sent} lead(s)</b> sent."
+    )
+    if scored == 0:
+        summary += "\n(No new posts since last scan.)"
+    send_telegram(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, summary)
+
     conn.close()
 
 
