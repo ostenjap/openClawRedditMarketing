@@ -24,3 +24,13 @@ Thumbs.db
 .vscode/
 .idea/
 ANTIGRAVITY_AGENT.md
+
+# OpenClaw local backup — contains DeepSeek API key + config. NEVER commit.
+openclaw-backup/
+
+# Personal CV / identity / memory (private — not for a public repo)
+**/profile.md
+**/USER.md
+**/MEMORY.md
+openclaw-skills/_*.md
+openclaw-skills/_*.py

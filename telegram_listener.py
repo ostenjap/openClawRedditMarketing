@@ -10,9 +10,11 @@ Natural language (smart path):
   "run the bot" · "any leads?" · "draft me some tweets" · "how's it going?"
 """
 
+import html
 import json
 import os
 import subprocess
+import threading
 import time
 import requests
 from openai import OpenAI
@@ -53,13 +55,14 @@ Respond ONLY with valid JSON:
 Keep replies concise and casual — you're a sharp assistant, not corporate."""
 
 
-# The 3 persistent buttons shown at the bottom of the chat.
+# The persistent buttons shown at the bottom of the chat.
 BTN_REDDIT = "🔍 Reddit Leads"
 BTN_TWEETS = "🐦 Draft Tweets"
 BTN_REPLY  = "💬 Reply to Tweet"
+BTN_JOB    = "💼 Find Data Job"
 
 MENU_KEYBOARD = json.dumps({
-    "keyboard": [[BTN_REDDIT, BTN_TWEETS], [BTN_REPLY]],
+    "keyboard": [[BTN_REDDIT, BTN_TWEETS], [BTN_REPLY, BTN_JOB]],
     "resize_keyboard": True,
     "is_persistent": True,
 })
@@ -105,6 +108,29 @@ def run_lead_bot():
         stdout=open(f"{BOT_DIR}/bot.log", "a"),
         stderr=subprocess.STDOUT,
     )
+
+
+def find_data_job():
+    """Run the freelance-finder skill in a background thread (it takes ~60s),
+    then send the ranked results to Telegram in Telegram-safe chunks."""
+    def worker():
+        try:
+            result = subprocess.run(
+                [f"{BOT_DIR}/venv/bin/python",
+                 f"{BOT_DIR}/skills/freelance-finder/find_gigs.py"],
+                capture_output=True, text=True, cwd=BOT_DIR, timeout=240,
+            )
+            out = (result.stdout or result.stderr or "No output").strip()
+            # Telegram caps messages ~4096 chars; chunk on a safe boundary.
+            for i in range(0, len(out), 3500):
+                chunk = html.escape(out[i:i + 3500])
+                send(f"<pre>{chunk}</pre>")
+        except subprocess.TimeoutExpired:
+            send("⚠️ Job search timed out — try again in a moment.")
+        except Exception as e:
+            send(f"⚠️ Job finder error: {e}")
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def start_tweet_flow():
@@ -237,6 +263,10 @@ def handle(text: str):
         STATE["mode"] = "await_reply_tweet"
         send("💬 Paste the tweet you want to reply to (text or x.com link).")
         return
+    if label == BTN_JOB:
+        send("💼 Searching data jobs across Remotive, Jobicy, Arbeitnow… (~60s)")
+        find_data_job()
+        return
 
     if cmd == "/run":
         send("⏳ Scanning Reddit (~10s) — I'll ping you with results.")
@@ -244,6 +274,9 @@ def handle(text: str):
     elif cmd == "/tweets":
         STATE["mode"] = None  # reset any stale flow
         start_tweet_flow()
+    elif cmd == "/job":
+        send("💼 Searching data jobs across Remotive, Jobicy, Arbeitnow… (~60s)")
+        find_data_job()
     elif cmd == "/menu":
         send("Here are your buttons 👇", keyboard=True)
     elif cmd == "/status":
@@ -256,6 +289,7 @@ def handle(text: str):
             "Tap a button below, talk to me normally, or use:\n"
             "/run — run the lead bot\n"
             "/tweets — draft 3 tweets\n"
+            "/job — find ranked data jobs\n"
             "/menu — show the buttons\n"
             "/status — last run summary\n"
             "/logs — recent logs",
