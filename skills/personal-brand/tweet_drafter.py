@@ -29,6 +29,8 @@ DEEPSEEK_MODEL   = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 TELEGRAM_TOKEN   = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
+client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+
 SKILL_DIR    = Path(__file__).resolve().parent
 CONTEXT_FILE = SKILL_DIR / "context.md"   # optional fresh material you append to
 
@@ -76,6 +78,76 @@ OUTPUT FORMAT — respond ONLY with valid JSON, no markdown:
 }}"""
 
 
+# --- Humanizer (second pass to strip AI-slop) ---
+
+HUMANIZE_PROMPT = """You are a ruthless editor that makes tweets sound like a real human wrote them, not an AI. Rewrite the tweet to KILL these AI tells:
+- Puffed-up significance: "stands as", "a testament to", "plays a crucial role", "marking a pivotal moment", "evolving landscape", "underscores".
+- Promo/hype adjectives: "vibrant", "groundbreaking", "seamless", "powerful", "cutting-edge", "unlock", "leverage", "paramount", "in today's fast-paced world", "supercharge", "game-changer".
+- Fake-depth "-ing" tails: "...ensuring X", "...highlighting Y", "...empowering Z".
+- The "it's not just X, it's Y" construction and forced rule-of-three lists.
+- Em-dash overuse, "moreover/furthermore", and tidy corporate symmetry.
+
+Then ADD SOUL: an actual opinion, varied rhythm (mix short punchy + one longer line), first person when it fits, specific concrete details, a little edge. A real person who ships at 2am.
+
+Keep the voice of @MaxQBasedLord: based indie builder, e/acc, engineer, confident, slightly contrarian. NO hashtags. Max one emoji. Under 280 chars. Keep the original point intact.
+
+Return ONLY the rewritten tweet text — no quotes, no preamble, no explanation."""
+
+
+def humanize(text: str) -> str:
+    """Run a tweet through a humanizing pass; fall back to original on failure."""
+    try:
+        resp = client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            max_tokens=200,
+            temperature=0.85,
+            messages=[
+                {"role": "system", "content": HUMANIZE_PROMPT},
+                {"role": "user", "content": text},
+            ],
+        )
+        out = resp.choices[0].message.content.strip().strip('"').strip()
+        return out if out else text
+    except Exception as e:
+        print(f"[warn] humanize failed, keeping original: {e}")
+        return text
+
+
+# --- Trending engineering hype (fresh material from Hacker News) ---
+
+def fetch_trending(limit: int = 6) -> list[dict]:
+    """Pull currently-hyped engineering/AI posts from Hacker News front page."""
+    KW = (
+        "ai", "llm", "gpt", "agent", "python", "rust", "golang", "engineer",
+        "developer", "software", "code", "coding", "database", "api", "model",
+        "open source", "open-source", "compute", "gpu", "startup", "saas",
+        "claude", "openai", "gemini", "framework", "kubernetes", "docker",
+        "self-host", "automation", "scraper", "data",
+    )
+    try:
+        r = requests.get(
+            "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=40",
+            timeout=10,
+        )
+        hits = r.json().get("hits", [])
+        trending = []
+        for h in hits:
+            title = (h.get("title") or "").strip()
+            if not title or not any(k in title.lower() for k in KW):
+                continue
+            url = h.get("url") or f"https://news.ycombinator.com/item?id={h.get('objectID')}"
+            trending.append({
+                "title": title,
+                "url": url,
+                "points": h.get("points", 0),
+            })
+        trending.sort(key=lambda x: x["points"], reverse=True)
+        return trending[:limit]
+    except Exception as e:
+        print(f"[warn] trending fetch failed: {e}")
+        return []
+
+
 def cli_context() -> str:
     """Inline context passed as: tweet_drafter.py --context "what I shipped today"."""
     if "--context" in sys.argv:
@@ -98,7 +170,7 @@ def load_context() -> str:
     return "\n".join(parts)
 
 
-def build_user_prompt() -> str:
+def build_user_prompt(trending: list[dict] | None = None) -> str:
     # Pick 3 pillars for variety; weight build-in-public + e/acc (best for this niche)
     weighted = (
         ["build-in-public"] * 3 + ["e/acc"] * 3 +
@@ -113,6 +185,16 @@ def build_user_prompt() -> str:
     lines = ["Draft 3 tweets, one for each of these pillars:\n"]
     for p in chosen:
         lines.append(f"- {p}: {PILLARS[p]}")
+
+    if trending:
+        lines.append(
+            "\nTRENDING IN ENGINEERING RIGHT NOW (Hacker News front page). "
+            "Make ONE of the three drafts a sharp, opinionated reaction to one of "
+            "these hyped topics — a hot take or insight, not a summary. Pick the one "
+            "you have the strongest angle on:"
+        )
+        for t in trending:
+            lines.append(f"- ({t['points']} pts) {t['title']}")
 
     ctx = load_context()
     if ctx:
@@ -130,8 +212,7 @@ def build_user_prompt() -> str:
     return "\n".join(lines)
 
 
-def generate_drafts() -> list[dict]:
-    client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+def generate_drafts(trending: list[dict] | None = None) -> list[dict]:
     try:
         resp = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
@@ -139,7 +220,7 @@ def generate_drafts() -> list[dict]:
             temperature=0.9,  # higher = more voice/variety
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt()},
+                {"role": "user", "content": build_user_prompt(trending)},
             ],
             response_format={"type": "json_object"},
         )
@@ -173,22 +254,27 @@ def send_telegram(text: str, button: dict | None = None):
 
 def main():
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] Drafting daily tweets...")
-    drafts = generate_drafts()
+
+    trending = fetch_trending()
+    print(f"  Trending engineering posts: {len(trending)}")
+
+    drafts = generate_drafts(trending)
     if not drafts:
         send_telegram("⚠️ Tweet drafter ran but produced nothing. Check logs.")
         return
 
-    send_telegram("🐦 <b>Today's tweet drafts</b>\nTap “Tweet this” to post — opens X pre-filled.")
+    send_telegram("🐦 <b>Today's tweet drafts</b>\nHumanized + one riding today's engineering hype. Tap “Tweet this” to post.")
     for i, d in enumerate(drafts, 1):
         pillar = d.get("pillar", "?")
-        text = d.get("text", "").strip()
+        raw = d.get("text", "").strip()
+        text = humanize(raw)            # second pass: strip AI-slop, add voice
         chars = len(text)
         button = {"text": "🐦 Tweet this", "url": tweet_intent_url(text)}
         send_telegram(
             f"<b>{i}. [{pillar}]</b> <i>({chars} chars)</i>\n<pre>{text}</pre>",
             button=button,
         )
-    print(f"  Sent {len(drafts)} drafts to Telegram.")
+    print(f"  Sent {len(drafts)} humanized drafts to Telegram.")
 
 
 if __name__ == "__main__":
