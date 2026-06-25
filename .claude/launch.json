@@ -6,7 +6,7 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["C:/Users/wiece/OneDrive/Desktop/FaradayX/backRoomGame/server/server.mjs"],
       "port": 8080,
-      "autoPort": true
+      "autoPort": false
     }
   ]
 }
