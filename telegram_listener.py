@@ -38,16 +38,17 @@ SKIP_WORDS = {"skip", "no", "none", "nothing", "evergreen", "cancel", "-"}
 ROUTER_PROMPT = """You are the brain of a Telegram control bot for "hackamaps" — a hackathon directory startup. The operator talks to you in plain language. Decide what they want.
 
 Available actions:
-- "run_lead_bot": scrape Reddit and score new leads (when they say things like "run the bot", "check reddit", "find leads", "go", "scan now")
+- "run_lead_bot": scrape Reddit and score new Hackamaps leads (when they say things like "run the bot", "check hackamaps", "find hackamaps leads", "scan hackathons")
+- "run_attention_bot": scrape Reddit and score new Attention Span Game leads (when they say things like "run attention bot", "find attention leads", "check attention", "scan focus")
 - "draft_tweets": generate 3 tweet drafts for their personal brand (when they say "draft tweets", "give me tweets", "write me a post", "tweet ideas")
 - "draft_reply": draft a reply to a specific tweet (when they PASTE a tweet, share an x.com/twitter link, or say "reply to this", "what should I say to this"). Put the tweet's text (and author/url if present) into tweet_text.
-- "get_status": show the last lead-bot run summary (when they ask "any leads?", "how did it go?", "status", "what happened")
+- "get_status": show the last Hackamaps lead-bot run summary (when they ask "any leads?", "how did it go?", "status", "what happened")
 - "get_logs": show recent raw logs (when they ask for "logs", "errors", "what broke")
 - "none": they're just chatting, asking a question, or want advice — answer them directly
 
 Respond ONLY with valid JSON:
 {
-  "action": "<one of: run_lead_bot, draft_tweets, draft_reply, get_status, get_logs, none>",
+  "action": "<one of: run_lead_bot, run_attention_bot, draft_tweets, draft_reply, get_status, get_logs, none>",
   "tweet_text": "<only for draft_reply: the tweet text to reply to, formatted as 'text | author | url' if you can extract those, else just the text>",
   "reply": "<a short, friendly, on-brand message to send back. If action is none, this is your full answer. If an action runs, this is a one-line 'on it' style ack.>"
 }
@@ -56,13 +57,18 @@ Keep replies concise and casual — you're a sharp assistant, not corporate."""
 
 
 # The persistent buttons shown at the bottom of the chat.
-BTN_REDDIT = "🔍 Reddit Leads"
-BTN_TWEETS = "🐦 Draft Tweets"
-BTN_REPLY  = "💬 Reply to Tweet"
-BTN_JOB    = "💼 Find Data Job"
+BTN_REDDIT    = "🔍 Reddit Leads"
+BTN_ATTENTION = "🧠 Attention Leads"
+BTN_TWEETS    = "🐦 Draft Tweets"
+BTN_REPLY     = "💬 Reply to Tweet"
+BTN_JOB       = "💼 Find Data Job"
 
 MENU_KEYBOARD = json.dumps({
-    "keyboard": [[BTN_REDDIT, BTN_TWEETS], [BTN_REPLY, BTN_JOB]],
+    "keyboard": [
+        [BTN_REDDIT, BTN_ATTENTION],
+        [BTN_TWEETS, BTN_REPLY],
+        [BTN_JOB]
+    ],
     "resize_keyboard": True,
     "is_persistent": True,
 })
@@ -106,6 +112,17 @@ def run_lead_bot():
         [f"{BOT_DIR}/venv/bin/python", f"{BOT_DIR}/main.py"],
         cwd=BOT_DIR,
         stdout=open(f"{BOT_DIR}/bot.log", "a"),
+        stderr=subprocess.STDOUT,
+    )
+
+
+def run_attention_bot():
+    """Fire-and-forget: launch the scan in the background so the bot stays
+    responsive. attention_main.py pings Telegram with a summary when done."""
+    subprocess.Popen(
+        [f"{BOT_DIR}/venv/bin/python", f"{BOT_DIR}/attention_main.py"],
+        cwd=BOT_DIR,
+        stdout=open(f"{BOT_DIR}/attention_bot.log", "a"),
         stderr=subprocess.STDOUT,
     )
 
@@ -184,6 +201,7 @@ def draft_reply(tweet_text: str):
 
 ACTIONS = {
     "run_lead_bot": run_lead_bot,
+    "run_attention_bot": run_attention_bot,
     "draft_tweets": start_tweet_flow,   # asks for today's focus first
     "get_status": get_status,
     "get_logs": get_logs,
@@ -250,11 +268,15 @@ def handle(text: str):
         draft_reply(text.strip())
         return
 
-    # --- The 3 menu buttons (Telegram sends the button label as text) ---
+    # --- The menu buttons (Telegram sends the button label as text) ---
     label = text.strip()
     if label == BTN_REDDIT:
         send("⏳ Scanning Reddit (~10s) — I'll ping you with results.")
         run_lead_bot()
+        return
+    if label == BTN_ATTENTION:
+        send("🧠 Scanning Reddit for attention leads (~15s) — I'll ping you with results.")
+        run_attention_bot()
         return
     if label == BTN_TWEETS:
         start_tweet_flow()
@@ -271,6 +293,9 @@ def handle(text: str):
     if cmd == "/run":
         send("⏳ Scanning Reddit (~10s) — I'll ping you with results.")
         run_lead_bot()
+    elif cmd == "/run_attention":
+        send("🧠 Scanning Reddit for attention leads (~15s) — I'll ping you with results.")
+        run_attention_bot()
     elif cmd == "/tweets":
         STATE["mode"] = None  # reset any stale flow
         start_tweet_flow()
@@ -285,9 +310,10 @@ def handle(text: str):
         get_logs()
     elif cmd == "/help":
         send(
-            "🤖 <b>Hackamaps Bot</b>\n\n"
+            "🤖 <b>Hackamaps & Attention Bot</b>\n\n"
             "Tap a button below, talk to me normally, or use:\n"
-            "/run — run the lead bot\n"
+            "/run — run Hackamaps leads scan\n"
+            "/run_attention — run Attention Game leads scan\n"
             "/tweets — draft 3 tweets\n"
             "/job — find ranked data jobs\n"
             "/menu — show the buttons\n"

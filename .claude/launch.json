@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backroom",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/wiece/OneDrive/Desktop/FaradayX/backRoomGame/server/server.mjs"],
+      "port": 8080,
+      "autoPort": true
+    }
+  ]
+}
