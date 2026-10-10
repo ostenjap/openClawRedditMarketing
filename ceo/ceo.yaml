@@ -1,0 +1,44 @@
+# CEO config — the FOUNDER owns this file. The CEO may propose changes (scorecard / chat) but never edits it.
+# Weeks run Monday-Sunday, Europe/Berlin. Money = LLM spend in USD (all agents + llm-gateway).
+
+north_star: first_payment          # done = first 'ceo log sale <lead>' (a paid pilot counts)
+
+week_targets:                      # the CEO is judged on these every Friday
+  contacted: 25                    # leads YOU emailed/DM'd (logged via 'done N' or the CRM status)
+  replies: 4
+  calls_booked: 2
+  demos: 1
+  offers_sent: 1
+
+budget_usd_week: 7                 # hard total for the CEO's allocation; the CLI refuses anything above it.
+                                   # 7 = what the OpenRouter key's $30/month cap leaves until Nov 1 (decided 2026-10-10).
+key_floor_usd: 3                   # below this much left on the OpenRouter key: report-only + no Opus meeting,
+                                   # so Plank itself never gets cut off by the key limit
+
+allowances:                        # default split; the CEO re-plans it each week with `ceo budget plan`
+  ceo: 5                           # Plank itself: chat (the big spender), the operate runs, Monday's Opus meeting
+  scout: 0.8
+  scribe: 0.3
+  ops: 0.1
+  samatha: 0.5                     # Samatha chat + her drafting pipeline (llm-gateway 'sam:' calls)
+  web: 0.3                         # Open WebUI features through llm-gateway (LinkedIn Drafter etc.)
+
+big_decision:                      # big = posted as a proposal, goes ahead after the window unless you say 👎
+  usd_over: 2
+  realloc_pct_over: 25
+  objection_hours: 12
+
+founder_moves_per_day: 3
+segments: [berlin-sme]             # starting focus; the CEO can switch (big decision): berlin-sme, dach, eu, us, all
+
+review:
+  miss_weeks_for_pip: 2            # missed = contacted or calls_booked under target
+  miss_weeks_for_board_review: 3
+
+meeting:                           # weekly agents meeting, chaired by the CEO on Claude Opus 5.5 (set on the Hermes job)
+  start: 2026-10-19                # first meeting Monday; before this date the job stays silent ($0)
+  hour: 8                          # Berlin time, Mondays; replaces that morning's operate run
+  standup_hour: 7                  # workers file their standups an hour before
+  standup_usd: 0.05                # per worker standup card
+
+operate_hours: [8, 13]             # Berlin time, weekdays: the CEO's autonomous operate runs

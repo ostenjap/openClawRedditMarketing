@@ -33,3 +33,7 @@ openclaw-backup/
 **/USER.md
 **/MEMORY.md
 openclaw-skills/_*
+
+# Brand build: throwaway verification renders (rebuild with brand/build_brand.py)
+brand/out/check_*.png
+brand/out/preview_*.html

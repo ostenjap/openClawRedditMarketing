@@ -1,0 +1,7 @@
+# CEO rituals (Plank-as-CEO). Box is UTC without CRON_TZ: each line fires at both possible UTC hours, `--at` keeps
+# only the run whose Berlin local hour matches. Output goes to Telegram via Plank's bot (--notify).
+30 6,7 * * 1-5 /usr/local/bin/ceo brief --at 8 --notify >> /root/ceo/cron.log 2>&1
+0 17,18 * * 1-5 /usr/local/bin/ceo checkin --at 19 --notify >> /root/ceo/cron.log 2>&1
+0 15,16 * * 5 /usr/local/bin/ceo scorecard --at 17 --notify >> /root/ceo/cron.log 2>&1
+0 5,6 * * 1 /usr/local/bin/ceo standups --at 7 >> /root/ceo/cron.log 2>&1
+5 * * * * /usr/local/bin/ceo dispatch --notify >> /root/ceo/cron.log 2>&1
