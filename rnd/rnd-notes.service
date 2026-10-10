@@ -1,0 +1,14 @@
+[Unit]
+Description=R&D notes API for the ui.techno-wanderlust.com R&D panel
+After=network.target docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /root/rnd-notes/rnd_notes_api.py
+Restart=on-failure
+RestartSec=5
+MemoryMax=100M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

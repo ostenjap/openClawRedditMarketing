@@ -1,0 +1,823 @@
+/*
+ * crons-tab.js — "Crons" + "LinkedIn Drafter" sidebar items and in-app panels for Open WebUI 0.11.4.
+ * Loaded via <script src="/crons-tab.js" defer></script> in /app/build/index.html.
+ *
+ * No frontend rebuild: everything is injected at runtime.
+ *  - Sidebar: clones the native "Search" row (div.px-1 > button#sidebar-search-button)
+ *    and inserts the Crons row directly under it, reusing the exact native classes,
+ *    icon size/stroke and active-state styling.
+ *  - Dashboard: a panel docked to the right of the sidebar (follows collapse/resize),
+ *    styled after the native Automations page (borderless rows, text-[0.8125rem],
+ *    small gray meta text, native badge colours). Colours come from the app's own
+ *    --color-gray-* variables, so light / dark / OLED themes follow automatically.
+ *  - Panels are registered in PANELS (Crons #crons, LinkedIn Drafter #linkedin-drafter);
+ *    their sidebar rows stack under Search in ORDER.
+ *  - URL: opening sets the hash to the panel's hash (deep-linkable, survives reload).
+ *    Any real navigation (sidebar link, back button, route change) closes the panel.
+ *  - Data: GET /api/v1/hermiscrons (read-only view of the Hermes cron jobs).
+ *
+ * Idempotent (marker attribute) and safe on the login page (no sidebar => no-op).
+ */
+(function () {
+	'use strict';
+	if (window.__cronsTabLoaded) return;
+	window.__cronsTabLoaded = true;
+
+	var LABEL = 'Crons';
+	var MARKER = 'data-crons-tab';
+	var API = '/api/v1/hermiscrons';
+	var POLL_MS = 30000;
+	var MOBILE_BP = 768; /* Open WebUI's $mobile breakpoint */
+
+	/* ---------- native-style icons (stroke 1.5, same as the sidebar's own) ---------- */
+	function svg(inner, cls) {
+		return (
+			'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" ' +
+			'stroke-width="1.5" stroke="currentColor" stroke-linecap="round" ' +
+			'stroke-linejoin="round" aria-hidden="true" class="' + (cls || 'size-4') + '">' +
+			inner + '</svg>'
+		);
+	}
+	var ICON_CLOCK = svg('<circle cx="12" cy="12" r="9.25"></circle><path d="M12 6.75V12l3.5 2"></path>');
+	var ICON_DOC = svg('<path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"></path>');
+	var ICON_SEARCH = svg('<path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"></path>', 'cv-ico');
+	var ICON_REFRESH = svg('<path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"></path>', 'cv-ico');
+	var ICON_SIDEBAR = svg('<path d="M19 21L5 21C3.89543 21 3 20.1046 3 19L3 5C3 3.89543 3.89543 3 5 3L19 3C20.1046 3 21 3.89543 21 5L21 19C21 20.1046 20.1046 21 19 21Z"></path><path d="M9.5 21V3"></path><path d="M5.5 10L7.25 12L5.5 14"></path>', 'cv-ico');
+	var ICON_X = svg('<path d="M6 18 18 6M6 6l12 12"></path>', 'cv-ico-sm');
+
+	var state = {
+		jobs: [],
+		loaded: false,
+		error: null,
+		query: '',
+		filter: 'all',
+		expanded: {},
+		fetchedAt: 0,
+		sig: ''
+	};
+	var view = null; /* #crons-view root, built lazily */
+	var els = {};
+	var isOpen = false;
+	var openPath = '';
+	var prevTitle = '';
+	var pollTimer = null;
+	var tickTimer = null;
+	var ro = null;
+	var observed = [];
+	var cur = null; /* active panel (PANELS entry) or null */
+	var ICON_PULSE = svg('<path d="M3 12h4l2.5-6 4 12 2.5-6H21"></path>');
+	var ICON_USERS = svg('<path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"></path>');
+	var ICON_KANBAN = svg('<rect x="3.75" y="3.75" width="4.5" height="16.5" rx="1.25"></rect><rect x="9.75" y="3.75" width="4.5" height="10" rx="1.25"></rect><rect x="15.75" y="3.75" width="4.5" height="13" rx="1.25"></rect>');
+	var ICON_BELL = svg('<path d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"></path>');
+	var ICON_BEAKER = svg('<path d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"></path>');
+	var PANELS = {
+		notifications: { key: 'notifications', label: 'Notifications', hash: '#notifications', itemId: 'sidebar-notifications-button', icon: ICON_BELL, el: null, link: null },
+		mission: { key: 'mission', label: 'Mission', hash: '#mission', itemId: 'sidebar-mission-button', icon: ICON_PULSE, el: null, link: null },
+		kanban: { key: 'kanban', label: 'Kanban', hash: '#kanban', itemId: 'sidebar-kanban-button', icon: ICON_KANBAN, el: null, link: null },
+		crm: { key: 'crm', label: 'Berlin CRM', hash: '#berlin-crm', itemId: 'sidebar-berlin-crm-button', icon: ICON_USERS, el: null, link: null },
+		crons: { key: 'crons', label: 'Crons', hash: '#crons', itemId: 'sidebar-crons-button', icon: ICON_CLOCK, el: null, link: null },
+		rnd: { key: 'rnd', label: 'R&D', hash: '#rnd', itemId: 'sidebar-rnd-button', icon: ICON_BEAKER, el: null, link: null },
+		drafter: { key: 'drafter', label: 'LinkedIn Drafter', hash: '#linkedin-drafter', itemId: 'sidebar-linkedin-drafter-button', icon: ICON_DOC, el: null, link: null }
+	};
+	var ORDER = ['notifications', 'mission', 'kanban', 'crm', 'drafter', 'rnd']; /* top-to-bottom under Search (Notifications first, added 2026-10-10). 'crons' is intentionally left out (Mission shows the automations); re-add it here to bring the tab back. */
+	/* native Search-row classes; refreshed from the real button when present */
+	var BASE_CLS =
+		'group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 ' +
+		'hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none';
+
+	var ACTIVE_CLS =
+		'grow flex items-center space-x-2 rounded-xl px-2 py-1.5 transition ' +
+		'bg-black/[0.035] dark:bg-white/[0.045]';
+
+	/* ====================================================================
+	 * Sidebar item
+	 * ==================================================================== */
+	function findSearchButton() {
+		var b = document.querySelector('#sidebar-search-button');
+		return b && b.closest('#sidebar') ? b : null;
+	}
+
+	function panelForHash() {
+		for (var i = 0; i < ORDER.length; i++) {
+			if (location.hash === PANELS[ORDER[i]].hash) return PANELS[ORDER[i]];
+		}
+		return null;
+	}
+
+	/* Clone the native row wrapper (div.px-1...) so spacing/hover match exactly. */
+	function makeItem(pn, anchorWrap) {
+		var wrap = anchorWrap.cloneNode(false); /* keep wrapper classes, drop children */
+		wrap.setAttribute(MARKER, pn.key);
+		wrap.removeAttribute('id');
+		wrap.removeAttribute('data-id');
+
+		var a = document.createElement('a');
+		a.href = '/' + pn.hash;
+		a.className = BASE_CLS;
+		a.setAttribute('aria-label', pn.label);
+		a.setAttribute('draggable', 'false');
+		a.id = pn.itemId;
+		a.innerHTML =
+			'<div class="self-center flex size-4 shrink-0 items-center justify-center">' + pn.icon + '</div>' +
+			'<div class="flex flex-1 self-center translate-y-[0.5px]">' +
+			'<div class=" self-center text-[0.8125rem] leading-5"></div></div>';
+		a.querySelector('.leading-5').textContent = pn.label; /* labels may contain '&' (R&D) */
+		a.addEventListener('click', function (e) {
+			if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; /* allow new-tab */
+			e.preventDefault();
+			e.stopPropagation(); /* keep SvelteKit's router out of it */
+			openView(pn.key);
+			if (window.innerWidth < MOBILE_BP) {
+				/* mobile: the sidebar is a drawer — close it like native items do */
+				var c = document.querySelector('#sidebar button[aria-label="Close Sidebar"]');
+				if (c) c.click();
+			}
+		});
+		wrap.appendChild(a);
+		anchorWrap.parentNode.insertBefore(wrap, anchorWrap.nextSibling);
+		pn.link = a;
+	}
+
+	function applyActiveStyle() {
+		ORDER.forEach(function (k) {
+			var pn = PANELS[k];
+			if (!pn.link) return;
+			var on = cur === pn;
+			pn.link.className = on ? ACTIVE_CLS : BASE_CLS;
+			if (on) pn.link.setAttribute('aria-current', 'page');
+			else pn.link.removeAttribute('aria-current');
+		});
+	}
+
+	function inject() {
+		var sb = findSearchButton();
+		if (sb) BASE_CLS = sb.className;
+		var prevWrap = null;
+		ORDER.forEach(function (k) {
+			var pn = PANELS[k];
+			var existing = document.getElementById(pn.itemId);
+			if (!existing) {
+				var anchor = prevWrap;
+				if (!anchor) {
+					/* first row goes under Search; fall back to New Chat */
+					var base = sb || document.querySelector('#sidebar #sidebar-new-chat-button');
+					anchor = base && base.parentElement;
+				}
+				if (anchor && anchor.parentNode) makeItem(pn, anchor);
+				existing = document.getElementById(pn.itemId);
+			}
+			pn.link = existing;
+			if (existing && existing.parentElement) prevWrap = existing.parentElement;
+		});
+		if (!isOpen) {
+			var hp = panelForHash();
+			if (hp && hp.link) openView(hp.key, true);
+		}
+		if (isOpen) {
+			if (view && !view.isConnected) mountView();
+			observeSidebar();
+			layout();
+		}
+		applyActiveStyle();
+	}
+
+	/* ====================================================================
+	 * Panel (styles, DOM, layout)
+	 * ==================================================================== */
+	var CSS =
+		'.cv-view{position:fixed;top:0;right:0;bottom:0;left:0;z-index:40;display:flex;flex-direction:column;' +
+		'font-size:.8125rem;line-height:1.25rem;color:inherit;' +
+		'--cv-name:var(--color-gray-800);--cv-meta:var(--color-gray-500);--cv-faint:var(--color-gray-400);' +
+		'--cv-hover:rgb(0 0 0 / .035);--cv-line:var(--color-gray-100);--cv-mono-bg:rgb(0 0 0 / .035);' +
+		'--cv-ok:oklch(.723 .219 149.579);--cv-ok-bg:oklch(.723 .219 149.579 / .2);--cv-ok-fg:oklch(.527 .154 150.069);' +
+		'--cv-err:oklch(.637 .237 25.331);--cv-err-bg:oklch(.637 .237 25.331 / .2);--cv-err-fg:oklch(.505 .213 27.518);' +
+		'--cv-warn-bg:oklch(.795 .184 86.047 / .2);--cv-warn-fg:oklch(.554 .135 66.442)}' +
+		'html.dark .cv-view{--cv-name:var(--color-gray-200);--cv-faint:var(--color-gray-600);' +
+		'--cv-hover:rgb(255 255 255 / .045);--cv-line:var(--color-gray-850);--cv-mono-bg:rgb(255 255 255 / .045);' +
+		'--cv-ok-fg:oklch(.925 .084 155.995);--cv-err-fg:oklch(.885 .062 18.334);--cv-warn-fg:oklch(.945 .129 101.54)}' +
+		'.cv-view[hidden]{display:none}' +
+		'.cv-view *{box-sizing:border-box}' +
+		'.cv-view button{font:inherit;color:inherit;background:transparent;border:0;cursor:pointer;padding:0}' +
+		'.cv-head{flex:none;padding:.5rem .625rem .25rem;display:flex;align-items:center;gap:.25rem}' +
+		'.cv-tog{display:none;width:1.75rem;height:1.75rem;align-items:center;justify-content:center;color:var(--color-gray-400)}' +
+		'.cv-view.cv-narrow .cv-tog{display:flex}' +
+		'.cv-title{font-size:.875rem;padding:.25rem .25rem;user-select:none}' +
+		'.cv-count{font-size:.875rem;color:var(--cv-meta)}' +
+		'.cv-spacer{flex:1}' +
+		'.cv-upd{font-size:.6875rem;color:var(--cv-faint);white-space:nowrap;margin-right:.25rem}' +
+		'.cv-iconbtn{width:1.75rem;height:1.75rem;display:flex;align-items:center;justify-content:center;border-radius:.5rem;color:var(--cv-meta);transition:background-color .15s}' +
+		'.cv-iconbtn:hover{background:var(--cv-hover)}' +
+		'.cv-iconbtn:focus-visible,.cv-row:focus-visible,.cv-chip:focus-visible{outline:2px solid var(--cv-faint);outline-offset:-2px}' +
+		'.cv-iconbtn.spin svg{animation:cv-spin .8s linear infinite}' +
+		'@keyframes cv-spin{to{transform:rotate(360deg)}}' +
+		'.cv-ico{width:.875rem;height:.875rem}.cv-iconbtn .cv-ico{width:1rem;height:1rem}.cv-tog .cv-ico{width:1rem;height:1rem}' +
+		'.cv-ico-sm{width:.75rem;height:.75rem}' +
+		'.cv-body{flex:1;min-height:0;overflow-y:auto;padding:0 .625rem .25rem}' +
+		'.cv-tools{display:flex;height:2rem;align-items:center;gap:.5rem;width:100%}' +
+		'.cv-search{flex:1;min-width:0;display:flex;align-items:center}' +
+		'.cv-search .cv-ico{margin:0 .75rem 0 .25rem;flex:none;color:var(--cv-meta)}' +
+		'.cv-search input{width:100%;font:inherit;font-size:.875rem;padding:.25rem 0;border:0;outline:0;background:transparent;color:inherit}' +
+		'.cv-search input::placeholder{color:var(--cv-faint)}' +
+		'.cv-clear{padding:.125rem!important;border-radius:9999px;display:flex;color:var(--cv-meta)}' +
+		'.cv-chips{display:flex;gap:.125rem;flex:none}' +
+		'.cv-chip{height:2rem;padding:0 .5rem!important;border-radius:.75rem;font-size:.8125rem;color:var(--cv-meta)!important;transition:background-color .15s,color .15s}' +
+		'.cv-chip:hover{background:var(--cv-hover)}' +
+		'.cv-chip[aria-pressed=true]{color:var(--cv-name)!important;background:var(--cv-hover)}' +
+		'.cv-list{display:grid;gap:.125rem;margin:.25rem 0}' +
+		'.cv-row{display:flex;align-items:center;gap:.5rem;min-height:2rem;width:100%;padding:.25rem .5rem;border-radius:.75rem;cursor:pointer;text-align:left;transition:background-color .15s}' +
+		'.cv-row:hover,.cv-item.open>.cv-row{background:var(--cv-hover)}' +
+		'.cv-dot{flex:none;width:.4375rem;height:.4375rem;border-radius:9999px;background:var(--cv-faint);opacity:.7}' +
+		'.cv-dot.ok{background:var(--cv-ok);opacity:1}.cv-dot.fail{background:var(--cv-err);opacity:1}.cv-dot.paused{background:transparent;box-shadow:inset 0 0 0 1.5px var(--cv-faint)}' +
+		'.cv-main{flex:1;min-width:0;overflow:hidden}' +
+		'.cv-l1{display:flex;align-items:center;gap:.5rem;min-width:0}' +
+		'.cv-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cv-name)}' +
+		'.cv-row:hover .cv-name{text-decoration:underline}' +
+		'.cv-when{flex:none;font-size:.6875rem;color:var(--cv-faint);white-space:nowrap}' +
+		'.cv-badge{flex:none;font-size:.75rem;line-height:1rem;padding:0 .375rem;border-radius:.375rem}' +
+		'.cv-badge.fail{background:var(--cv-err-bg);color:var(--cv-err-fg)}.cv-badge.paused{background:var(--cv-warn-bg);color:var(--cv-warn-fg)}' +
+		'.cv-sub{display:none;font-size:.6875rem;color:var(--cv-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+		'.cv-right{flex:none;max-width:16rem;text-align:right;font-size:.6875rem;color:var(--cv-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+		'.cv-detail{margin:.125rem .5rem .5rem 1.5rem;padding:.625rem .75rem;border-radius:.75rem;background:var(--cv-mono-bg);font-size:.75rem;line-height:1rem}' +
+		'.cv-kv{display:grid;grid-template-columns:7rem 1fr;gap:.25rem .75rem}' +
+		'.cv-kv dt{color:var(--cv-meta)}.cv-kv dd{margin:0;min-width:0;overflow-wrap:anywhere;color:var(--cv-name)}' +
+		'.cv-kv .mono{font-family:var(--font-mono,ui-monospace,monospace)}.cv-kv .err{color:var(--cv-err-fg)}' +
+		'.cv-out{margin:.625rem 0 0;padding:.5rem .625rem;max-height:16rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;' +
+		'font-family:var(--font-mono,ui-monospace,monospace);font-size:.6875rem;line-height:1rem;color:var(--cv-meta);border-radius:.5rem;border:1px solid var(--cv-line)}' +
+		'.cv-empty{display:flex;min-height:calc(100dvh - 13rem);flex-direction:column;align-items:center;justify-content:center;text-align:center}' +
+		'.cv-empty b{font-weight:400;font-size:.875rem;color:var(--cv-name);margin-bottom:.375rem}' +
+		'.cv-empty span{font-size:.75rem;line-height:1.25rem;color:var(--cv-meta);max-width:24rem}' +
+		'@media (max-width:767px){.cv-right{display:none}.cv-sub{display:block}.cv-upd{display:none}.cv-kv{grid-template-columns:5.5rem 1fr}.cv-row{padding:.375rem .5rem}}';
+
+	function el(tag, cls, text) {
+		var n = document.createElement(tag);
+		if (cls) n.className = cls;
+		if (text != null) n.textContent = text;
+		return n;
+	}
+
+	function ensureStyle() {
+		if (!document.getElementById('crons-view-style')) {
+			var st = document.createElement('style');
+			st.id = 'crons-view-style';
+			st.textContent = CSS;
+			document.head.appendChild(st);
+		}
+	}
+
+	function sidebarToggle() {
+		var tog = el('button', 'cv-tog');
+		tog.type = 'button';
+		tog.setAttribute('aria-label', 'Open Sidebar');
+		tog.innerHTML = ICON_SIDEBAR;
+		tog.addEventListener('click', function () {
+			var b = document.querySelector('button[aria-label="Open Sidebar"]');
+			if (b) b.click();
+		});
+		return tog;
+	}
+
+	/* LinkedIn Drafter — placeholder panel (same shell + native empty state). */
+	function buildDrafter() {
+		ensureStyle();
+		var v = el('div', 'cv-view');
+		v.id = 'drafter-view';
+		v.setAttribute('role', 'region');
+		v.setAttribute('aria-label', PANELS.drafter.label);
+		var head = el('div', 'cv-head');
+		head.appendChild(sidebarToggle());
+		head.appendChild(el('span', 'cv-title', PANELS.drafter.label));
+		var body = el('div', 'cv-body');
+		var empty = el('div', 'cv-empty');
+		empty.appendChild(el('b', null, 'Coming soon'));
+		empty.appendChild(el('span', null, 'Draft, review and copy LinkedIn posts here. This tab is set up and waiting for its first feature.'));
+		body.appendChild(empty);
+		v.appendChild(head);
+		v.appendChild(body);
+		v.hidden = true;
+		return v;
+	}
+
+	function buildView() {
+		ensureStyle();
+		view = el('div', 'cv-view');
+		view.id = 'crons-view';
+		view.setAttribute('role', 'region');
+		view.setAttribute('aria-label', LABEL);
+
+		var head = el('div', 'cv-head');
+		var tog = el('button', 'cv-tog');
+		tog.type = 'button';
+		tog.setAttribute('aria-label', 'Open Sidebar');
+		tog.innerHTML = ICON_SIDEBAR;
+		tog.addEventListener('click', function () {
+			var b = document.querySelector('button[aria-label="Open Sidebar"]');
+			if (b) b.click();
+		});
+		els.count = el('span', 'cv-count');
+		els.upd = el('span', 'cv-upd');
+		els.refresh = el('button', 'cv-iconbtn');
+		els.refresh.type = 'button';
+		els.refresh.setAttribute('aria-label', 'Refresh');
+		els.refresh.title = 'Refresh';
+		els.refresh.innerHTML = ICON_REFRESH;
+		els.refresh.addEventListener('click', function () { fetchJobs(true); });
+		head.appendChild(tog);
+		head.appendChild(el('span', 'cv-title', LABEL));
+		head.appendChild(els.count);
+		head.appendChild(el('span', 'cv-spacer'));
+		head.appendChild(els.upd);
+		head.appendChild(els.refresh);
+
+		var body = el('div', 'cv-body');
+		var tools = el('div', 'cv-tools');
+		var search = el('div', 'cv-search');
+		search.insertAdjacentHTML('beforeend', ICON_SEARCH);
+		els.input = el('input');
+		els.input.type = 'text';
+		els.input.placeholder = 'Search Crons';
+		els.input.setAttribute('aria-label', 'Search Crons');
+		els.input.maxLength = 200;
+		els.input.addEventListener('input', function () {
+			state.query = els.input.value;
+			els.clear.style.display = state.query ? '' : 'none';
+			render();
+		});
+		els.clear = el('button', 'cv-clear');
+		els.clear.type = 'button';
+		els.clear.setAttribute('aria-label', 'Clear search');
+		els.clear.innerHTML = ICON_X;
+		els.clear.style.display = 'none';
+		els.clear.addEventListener('click', function () {
+			els.input.value = '';
+			state.query = '';
+			els.clear.style.display = 'none';
+			render();
+			els.input.focus();
+		});
+		search.appendChild(els.input);
+		search.appendChild(els.clear);
+
+		var chips = el('div', 'cv-chips');
+		chips.setAttribute('role', 'group');
+		chips.setAttribute('aria-label', 'Filter');
+		els.chips = {};
+		[['all', 'All'], ['active', 'Active'], ['paused', 'Paused'], ['failed', 'Failed']].forEach(function (f) {
+			var b = el('button', 'cv-chip', f[1]);
+			b.type = 'button';
+			b.setAttribute('aria-pressed', f[0] === state.filter ? 'true' : 'false');
+			b.addEventListener('click', function () {
+				state.filter = f[0];
+				for (var k in els.chips) els.chips[k].setAttribute('aria-pressed', k === f[0] ? 'true' : 'false');
+				render();
+			});
+			els.chips[f[0]] = b;
+			chips.appendChild(b);
+		});
+		tools.appendChild(search);
+		tools.appendChild(chips);
+
+		els.list = el('div', 'cv-list');
+		els.empty = el('div');
+		body.appendChild(tools);
+		body.appendChild(els.list);
+		body.appendChild(els.empty);
+		view.appendChild(head);
+		view.appendChild(body);
+		els.body = body;
+		mountView();
+	}
+
+	function mountView() {
+		var root = document.querySelector('.app > div') || document.body;
+		root.appendChild(view);
+	}
+
+	function layout() {
+		if (!view) return;
+		var narrow = window.innerWidth < MOBILE_BP;
+		var left = 0;
+		if (!narrow) {
+			var sbs = document.querySelectorAll('[id="sidebar"]');
+			for (var i = 0; i < sbs.length; i++) {
+				var r = sbs[i].getBoundingClientRect();
+				if (r.width > 0 && r.right > left) left = r.right;
+			}
+		}
+		view.style.left = Math.round(left) + 'px';
+		view.classList.toggle('cv-narrow', narrow);
+		/* opaque background identical to the app canvas (follows light/dark/OLED) */
+		var root = view.parentElement;
+		var bg = root && getComputedStyle(root).backgroundColor;
+		if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') {
+			bg = getComputedStyle(document.body).backgroundColor;
+		}
+		view.style.backgroundColor = bg;
+	}
+
+	function observeSidebar() {
+		if (!('ResizeObserver' in window)) return;
+		if (!ro) ro = new ResizeObserver(layout);
+		var sbs = document.querySelectorAll('[id="sidebar"]');
+		for (var i = 0; i < sbs.length; i++) {
+			if (observed.indexOf(sbs[i]) === -1) {
+				ro.observe(sbs[i]);
+				observed.push(sbs[i]);
+			}
+		}
+		observed = observed.filter(function (n) { return n.isConnected || (ro.unobserve(n), false); });
+	}
+
+	/* ====================================================================
+	 * Formatting helpers
+	 * ==================================================================== */
+	var rtf = null;
+	try { rtf = new Intl.RelativeTimeFormat(navigator.language || 'en', { numeric: 'auto' }); } catch (e) { rtf = null; }
+
+	function relTime(iso) {
+		if (!iso) return '';
+		var d = new Date(iso);
+		if (isNaN(d)) return '';
+		var sec = Math.round((d - Date.now()) / 1000), abs = Math.abs(sec);
+		if (abs < 45) return 'just now';
+		var v, u;
+		if (abs < 3600) { v = Math.round(sec / 60); u = 'minute'; }
+		else if (abs < 86400) { v = Math.round(sec / 3600); u = 'hour'; }
+		else if (abs < 86400 * 30) { v = Math.round(sec / 86400); u = 'day'; }
+		else { v = Math.round(sec / (86400 * 30)); u = 'month'; }
+		if (rtf) return rtf.format(v, u);
+		return (v < 0 ? Math.abs(v) + ' ' + u + 's ago' : 'in ' + v + ' ' + u + 's');
+	}
+
+	function absTime(iso) {
+		if (!iso) return '—';
+		var d = new Date(iso);
+		if (isNaN(d)) return String(iso);
+		try {
+			return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+		} catch (e) {
+			return d.toString();
+		}
+	}
+
+	var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+	function pad2(n) { return ('0' + n).slice(-2); }
+
+	/* 5-field cron -> readable text. Times are the server's (UTC) — say so. */
+	function humanSchedule(expr, utc) {
+		if (!expr) return '—';
+		var raw = String(expr).trim();
+		var p = raw.split(/\s+/);
+		if (p.length !== 5) return raw;
+		var m = p[0], h = p[1], dom = p[2], mon = p[3], dow = p[4];
+		var tz = utc ? ' UTC' : '';
+		var num = /^\d+$/;
+		if (/^\*\/\d+$/.test(m) && h === '*' && dom === '*' && mon === '*' && dow === '*') return 'Every ' + m.slice(2) + ' min';
+		if (num.test(m) && h === '*' && dom === '*' && mon === '*' && dow === '*') return 'Hourly at :' + pad2(m);
+		if (num.test(m) && num.test(h)) {
+			var t = pad2(h) + ':' + pad2(m) + tz;
+			if (dom === '*' && mon === '*' && dow === '*') return 'Daily at ' + t;
+			if (dom === '*' && mon === '*' && /^[0-7]$/.test(dow)) return 'Weekly on ' + DAYS[dow % 7] + 's at ' + t;
+			if (num.test(dom) && mon === '*' && dow === '*') return 'Monthly on day ' + dom + ' at ' + t;
+		}
+		return raw;
+	}
+
+	function jobState(j) {
+		var failed = !!j.last_status && j.last_status !== 'ok';
+		return {
+			paused: !j.enabled,
+			failed: failed,
+			ok: j.last_status === 'ok',
+			never: !j.last_status && !j.last_run_at
+		};
+	}
+
+	function isUtc(iso) { return typeof iso === 'string' && /(Z|[+-]00:?00)$/.test(iso); }
+
+	/* ====================================================================
+	 * Render
+	 * ==================================================================== */
+	function matches(j, st) {
+		if (state.filter === 'active' && st.paused) return false;
+		if (state.filter === 'paused' && !st.paused) return false;
+		if (state.filter === 'failed' && !st.failed) return false;
+		var q = state.query.trim().toLowerCase();
+		if (!q) return true;
+		return [j.name, j.id, j.schedule_display, j.last_error].join(' ').toLowerCase().indexOf(q) !== -1;
+	}
+
+	function kv(dl, label, value, cls) {
+		var dt = el('dt', null, label);
+		var dd = el('dd', cls || null, value);
+		dl.appendChild(dt);
+		dl.appendChild(dd);
+	}
+
+	function buildDetail(j, st) {
+		var box = el('div', 'cv-detail');
+		var dl = el('dl', 'cv-kv');
+		kv(dl, 'Schedule', j.schedule_display || '—', 'mono');
+		kv(dl, 'State', st.paused ? 'Paused' : 'Active');
+		kv(dl, 'Next run', st.paused ? '—' : absTime(j.next_run_at));
+		kv(dl, 'Last run', j.last_run_at ? absTime(j.last_run_at) : 'Never');
+		if (j.last_status) kv(dl, 'Last status', j.last_status, st.failed ? 'err' : null);
+		if (j.last_error) kv(dl, 'Error', String(j.last_error), 'err');
+		if (j.last_delivery_error) kv(dl, 'Delivery error', String(j.last_delivery_error), 'err');
+		kv(dl, 'Job ID', j.id || '—', 'mono');
+		box.appendChild(dl);
+		if (j.output_tail) box.appendChild(el('pre', 'cv-out', j.output_tail));
+		return box;
+	}
+
+	function buildRow(j) {
+		var st = jobState(j);
+		var id = String(j.id || j.name);
+		var open = !!state.expanded[id];
+		var utc = isUtc(j.next_run_at) || isUtc(j.last_run_at);
+		var item = el('div', 'cv-item' + (open ? ' open' : ''));
+
+		var row = el('div', 'cv-row');
+		row.setAttribute('role', 'button');
+		row.tabIndex = 0;
+		row.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+		row.appendChild(el('span', 'cv-dot ' + (st.failed ? 'fail' : st.paused ? 'paused' : st.ok ? 'ok' : '')));
+
+		var main = el('div', 'cv-main');
+		var l1 = el('div', 'cv-l1');
+		var name = el('div', 'cv-name', j.name || j.id || '?');
+		name.title = j.name || '';
+		l1.appendChild(name);
+		var when = el('div', 'cv-when', j.last_run_at ? relTime(j.last_run_at) : 'Never run');
+		if (j.last_run_at) when.title = absTime(j.last_run_at);
+		l1.appendChild(when);
+		if (st.failed) l1.appendChild(el('span', 'cv-badge fail', 'Failed'));
+		if (st.paused) l1.appendChild(el('span', 'cv-badge paused', 'Paused'));
+		main.appendChild(l1);
+
+		var human = humanSchedule(j.schedule_display, utc);
+		var next = st.paused ? 'Paused' : (j.next_run_at ? 'next ' + relTime(j.next_run_at) : '');
+		var meta = human + (next ? ' · ' + next : '');
+		main.appendChild(el('div', 'cv-sub', meta));
+		row.appendChild(main);
+
+		var right = el('div', 'cv-right', meta);
+		right.title = (j.schedule_display || '') + (j.next_run_at ? ' · next ' + absTime(j.next_run_at) : '');
+		row.appendChild(right);
+
+		function toggle() {
+			state.expanded[id] = !state.expanded[id];
+			render();
+		}
+		row.addEventListener('click', toggle);
+		row.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+		});
+		item.appendChild(row);
+		if (open) item.appendChild(buildDetail(j, st));
+		return item;
+	}
+
+	function render() {
+		if (!view) return;
+		var total = state.jobs.length;
+		els.count.textContent = state.loaded ? String(total) : '';
+		els.list.textContent = '';
+		els.empty.textContent = '';
+		els.empty.className = '';
+
+		function empty(title, sub) {
+			els.empty.className = 'cv-empty';
+			els.empty.appendChild(el('b', null, title));
+			els.empty.appendChild(el('span', null, sub));
+		}
+
+		if (!state.loaded) {
+			if (state.error) empty('Couldn’t load crons', state.error);
+			else empty('Loading…', '');
+			updateUpdated();
+			return;
+		}
+		var shown = 0;
+		var frag = document.createDocumentFragment();
+		for (var i = 0; i < state.jobs.length; i++) {
+			var j = state.jobs[i];
+			if (!matches(j, jobState(j))) continue;
+			frag.appendChild(buildRow(j));
+			shown++;
+		}
+		els.list.appendChild(frag);
+		if (!shown) {
+			if (state.query || state.filter !== 'all') {
+				empty('No results found', 'Try adjusting your search or filter to find what you are looking for.');
+			} else {
+				empty('No crons found', 'Scheduled Proxious jobs will show up here.');
+			}
+		}
+		updateUpdated();
+	}
+
+	function updateUpdated() {
+		if (!els.upd) return;
+		if (state.error && state.loaded) {
+			els.upd.textContent = 'Offline — showing last data';
+			return;
+		}
+		if (!state.fetchedAt) { els.upd.textContent = ''; return; }
+		var s = Math.round((Date.now() - state.fetchedAt) / 1000);
+		els.upd.textContent = 'Updated ' + (s < 10 ? 'just now' : s < 60 ? s + 's ago' : Math.round(s / 60) + 'm ago');
+	}
+
+	/* ====================================================================
+	 * Data
+	 * ==================================================================== */
+	var inflight = false;
+	function authHeaders() {
+		var h = { Accept: 'application/json' };
+		try {
+			var t = localStorage.token;
+			if (t) h.Authorization = 'Bearer ' + t;
+		} catch (e) { /* storage blocked: cookie auth still works */ }
+		return h;
+	}
+
+	function fetchJobs(manual) {
+		if (inflight) return;
+		if (!manual && document.hidden) return;
+		inflight = true;
+		var changed = false;
+		if (manual && els.refresh) els.refresh.classList.add('spin');
+		fetch(API, { credentials: 'same-origin', headers: authHeaders() })
+			.then(function (r) {
+				if (!r.ok) throw new Error(r.status === 401 ? 'Session expired — reload the page.' : 'Server returned ' + r.status);
+				return r.json();
+			})
+			.then(function (d) {
+				var jobs = d.jobs || [];
+				var sig = JSON.stringify(jobs);
+				changed = sig !== state.sig || !state.loaded || !!state.error;
+				state.sig = sig;
+				state.jobs = jobs;
+				state.loaded = true;
+				state.error = null;
+				state.fetchedAt = Date.now();
+			})
+			.catch(function (e) {
+				state.error = (e && e.message) || 'Network error';
+				changed = true;
+			})
+			.then(function () {
+				inflight = false;
+				if (els.refresh) setTimeout(function () { els.refresh.classList.remove('spin'); }, 350);
+				/* skip the rebuild when nothing changed so selections / scroll survive polling */
+				if (changed) render();
+				else updateUpdated();
+			});
+	}
+
+	/* ====================================================================
+	 * Open / close + URL handling
+	 * ==================================================================== */
+	function startCrons() {
+		render();
+		fetchJobs(true);
+		pollTimer = setInterval(function () { fetchJobs(false); }, POLL_MS);
+		tickTimer = setInterval(function () {
+			updateUpdated();
+			/* keep "x ago" labels honest without a refetch (skip while a row is open) */
+			if (!document.hidden && !Object.keys(state.expanded).some(function (k) { return state.expanded[k]; })) render();
+		}, 60000);
+	}
+
+	function stopCrons() {
+		clearInterval(pollTimer);
+		clearInterval(tickTimer);
+		pollTimer = tickTimer = null;
+	}
+
+	function openView(key, fromUrl) {
+		var pn = PANELS[key];
+		if (!pn || cur === pn) return;
+		if (cur) closeView(false); /* switching panels */
+		if (!pn.el) {
+			if (key === 'crons') { buildView(); pn.el = view; }
+			else if (registered[key]) pn.el = registered[key].build(HOST);
+			else pn.el = buildDrafter(); /* placeholder until drafter-panel.js registers */
+		}
+		view = pn.el;
+		if (!view.isConnected) mountView();
+		cur = pn;
+		isOpen = true;
+		openPath = location.pathname;
+		view.hidden = false;
+		prevTitle = document.title;
+		var base = (prevTitle.split(' / ').pop() || 'Proxious').trim();
+		document.title = pn.label + ' / ' + base;
+		if (!fromUrl && location.hash !== pn.hash) location.hash = pn.hash.slice(1);
+		applyActiveStyle();
+		layout();
+		observeSidebar();
+		if (key === 'crons') startCrons();
+		else if (registered[key] && registered[key].onOpen) registered[key].onOpen();
+		window.addEventListener('resize', layout);
+		document.addEventListener('transitionend', onSidebarTransition, true);
+	}
+
+	/* ---- panel plug-in API (used by drafter-panel.js) ---- */
+	var registered = {};
+	var HOST = {
+		el: el, ensureStyle: ensureStyle, sidebarToggle: sidebarToggle, MOBILE_BP: MOBILE_BP,
+		icons: { search: ICON_SEARCH, refresh: ICON_REFRESH, x: ICON_X, doc: ICON_DOC, clock: ICON_CLOCK },
+		relayout: function () { layout(); }
+	};
+	window.__cvRegisterPanel = function (key, impl) {
+		registered[key] = impl;
+		var pn = PANELS[key];
+		if (!pn || key === 'crons') return;
+		var wasOpen = cur === pn;
+		if (wasOpen) closeView(false);
+		if (pn.el && pn.el.parentNode) pn.el.parentNode.removeChild(pn.el);
+		pn.el = null; /* rebuilt from the registered implementation on next open */
+		if (wasOpen) openView(key, true);
+	};
+
+	/* sidebar collapse/expand animates its width: re-dock when it finishes */
+	function onSidebarTransition(e) {
+		if (e.target && e.target.id === 'sidebar') layout();
+	}
+
+	function closeView(clearHash) {
+		if (!isOpen) return;
+		var pn = cur;
+		isOpen = false;
+		cur = null;
+		if (view) view.hidden = true;
+		if (pn && pn.key === 'crons') stopCrons();
+		else if (pn && registered[pn.key] && registered[pn.key].onClose) registered[pn.key].onClose();
+		window.removeEventListener('resize', layout);
+		document.removeEventListener('transitionend', onSidebarTransition, true);
+		if (ro) { ro.disconnect(); observed = []; }
+		if (prevTitle) document.title = prevTitle;
+		if (clearHash && pn && location.hash === pn.hash) {
+			try { history.replaceState(history.state, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+		}
+		applyActiveStyle();
+	}
+
+	function onRouteChange() {
+		if (isOpen && location.pathname !== openPath) closeView(true);
+	}
+
+	/* keep the open panel in step with back/forward and manual hash edits */
+	function syncFromHash() {
+		var hp = panelForHash();
+		if (isOpen && (!hp || hp !== cur)) {
+			if (hp) openView(hp.key, true);
+			else closeView(false);
+		} else if (!isOpen && hp) {
+			inject();
+		}
+	}
+
+	function patchHistory() {
+		['pushState', 'replaceState'].forEach(function (m) {
+			var orig = history[m];
+			history[m] = function () {
+				var r = orig.apply(this, arguments);
+				setTimeout(onRouteChange, 0);
+				return r;
+			};
+		});
+		window.addEventListener('popstate', function () {
+			syncFromHash();
+			onRouteChange();
+		});
+		window.addEventListener('hashchange', syncFromHash);
+		/* any other sidebar link (chat, New Chat, Notes, Workspace…) leaves the panel */
+		document.addEventListener(
+			'click',
+			function (e) {
+				if (!isOpen || !e.target || !e.target.closest) return;
+				var a = e.target.closest('a[href]');
+				if (a && a.closest('#sidebar') && !a.closest('[' + MARKER + ']')) closeView(true);
+			},
+			true
+		);
+	}
+
+	function start() {
+		patchHistory();
+		inject();
+		var mo = new MutationObserver(function () {
+			/* setTimeout lets Svelte finish teardown/re-render before re-inject */
+			setTimeout(inject, 0);
+		});
+		mo.observe(document.body, { childList: true, subtree: true });
+	}
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', start);
+	} else {
+		start();
+	}
+})();
