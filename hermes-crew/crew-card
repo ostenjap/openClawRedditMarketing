@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# crew-card: create a crew kanban card with the standard guardrails already on it.
+#   crew-card <scout|scribe|ops|analyst> "<title>" ["<body>"] [extra hermes kanban create flags...]
+# Adds: --max-runtime 1200 --max-retries 1 and an idempotency key (same worker + title on the
+# same day returns the existing card instead of creating a duplicate). Override any default by
+# passing the flag again in the extra flags. Telegram is subscribed by crew_autosub.py within a minute.
+set -euo pipefail
+if [ $# -lt 2 ]; then
+  echo 'usage: crew-card <scout|scribe|ops|analyst> "<title>" ["<body>"] [extra flags]' >&2
+  exit 2
+fi
+who="$1"; title="$2"; shift 2
+case "$who" in scout|scribe|ops|analyst) ;; *) echo "unknown worker: $who" >&2; exit 2 ;; esac
+body=""
+if [ $# -gt 0 ] && [[ "$1" != --* ]]; then body="$1"; shift; fi
+key="$(printf '%s|%s|%s' "$who" "$title" "$(date +%F)" | sha1sum | cut -c1-16)"
+args=(--assignee "$who" --max-runtime 1200 --max-retries 1 --idempotency-key "crew-$key")
+[ -n "$body" ] && args+=(--body "$body")
+exec hermes kanban create "$title" "${args[@]}" "$@"

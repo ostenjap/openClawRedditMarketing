@@ -1,0 +1,12 @@
+# Samatha KPI targets — YOU own these numbers. Samatha may propose changes in a report but never edits this file.
+# Leave a value empty to track without a target. Weekly = Monday-Sunday (UTC).
+targets:
+  leads_per_week: 2              # north star: qualified DMs / leads you log with 'lead <name> [post url]'
+  followers_per_week: 50         # from the analytics export FOLLOWERS sheet
+  profile_views_per_week:        # only if your export includes it
+  engagement_rate: 0.03          # (reactions+comments+reposts) / impressions, impression-weighted per week
+  comments_per_post: 8           # needs per-post exports or 'metrics <post> --comments N'
+  impressions_median:            # tracked for trend only
+  posts_per_week: 3
+  edit_distance_median: 0.20     # how much you rewrite my drafts (lower = better voice match)
+  cost_per_post_usd: 0.20        # LLM spend per published Samatha post

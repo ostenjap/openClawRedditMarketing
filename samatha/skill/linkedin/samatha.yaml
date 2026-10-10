@@ -1,0 +1,12 @@
+# Samatha engine settings (read by /usr/local/bin/samatha). All calls go through llm-gateway (allowlist + daily cap).
+models:
+  hooks: z-ai/glm-5.3-flash                 # 8 cheap variations; length validated in code
+  hooks_fallback: deepseek/deepseek-v4.1-flash
+  draft: anthropic/claude-sonnet-5        # drafting + revisions
+  structural: deepseek/deepseek-v4.1-flash  # rubric critic (different family from drafter)
+  voice: anthropic/claude-sonnet-5        # voice critic
+  cheap: deepseek/deepseek-v4.1-flash       # topic plan, weekly "why", tagging imports
+daily_cap_usd: 1.50       # Samatha's own budget (UTC day), on top of llm-gateway's global cap
+per_idea_cap_usd: 0.35    # stops revising once one idea has cost this much
+max_revisions: 2
+examples_in_prompt: 20

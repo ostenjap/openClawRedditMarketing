@@ -1,0 +1,11 @@
+# Draft quality rubric. Weighted score 0-100; a draft passes at >= pass_score AND every dimension at/above its min.
+# 'samatha calibrate' writes rubric.proposed.yaml from real engagement data; it is only applied when you approve.
+pass_score: 80
+dimensions:
+  hook:       {weight: 20, min: 8}
+  voice:      {weight: 25, min: 8}
+  clarity:    {weight: 15, min: 8}
+  insight:    {weight: 15, min: 7}
+  cta:        {weight: 10, min: 7}
+  formatting: {weight: 10, min: 8}
+  factual:    {weight: 5,  min: pass}

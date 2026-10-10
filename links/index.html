@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Osten Jap — Everything, one click</title>
+<style>
+ :root { color-scheme: dark; }
+ * { box-sizing: border-box; }
+ body { margin:0; background:#0d1117; color:#e6edf3; font:16px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; padding:20px 16px; }
+
+ /* Phone: one column. Wider screens: cards flow sideways, headings span the full row. */
+ main { max-width: 520px; margin: 0 auto; display:grid; grid-template-columns: 1fr; gap:10px; }
+ @media (min-width: 640px) {
+   main { max-width: 1180px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap:12px; }
+   body { padding:32px 28px; }
+ }
+ main > .avatar, main > h1, main > .tag, main > #q, main > h2, main > footer { grid-column: 1 / -1; }
+
+ .avatar { width:72px; height:72px; border-radius:50%; margin:6px auto 0; background:linear-gradient(135deg,#1f6feb,#f0883e);
+   display:flex; align-items:center; justify-content:center; font-size:1.6rem; font-weight:800; color:#fff; letter-spacing:1px; }
+ h1 { text-align:center; font-size:1.3rem; margin:0; }
+ .tag { text-align:center; color:#8b949e; font-size:.95rem; margin:0 0 .6em; }
+ h2 { font-size:.85rem; text-transform:uppercase; letter-spacing:.08em; color:#79c0ff; margin:1.2em 0 0; }
+ h2.favs { color:#f2cc60; }
+ #q { width:100%; max-width:520px; justify-self:center; padding:10px 12px; border-radius:10px; border:1px solid #30363d; background:#161b22;
+   color:#e6edf3; font-size:1rem; }
+
+ .item { position:relative; display:flex; }
+ .card { position:relative; display:block; flex:1; background:#161b22; border:1px solid #30363d; border-radius:14px;
+   padding:14px 44px 14px 16px; text-decoration:none; color:#e6edf3;
+   transition:transform .06s, border-color .15s, background .15s; }
+ .card:hover, .card:active, .card:focus-visible { transform:scale(.985); border-color:#1f6feb; background:#1a2029; outline:none; }
+ .card .t { display:block; font-weight:700; font-size:1.02rem; }
+ .card .d { display:block; color:#8b949e; font-size:.85rem; margin-top:3px; }
+ .chev { position:absolute; right:14px; bottom:10px; color:#58a6ff; font-size:1.3rem; line-height:1; }
+
+ .star { position:absolute; top:6px; right:6px; width:34px; height:34px; border:0; border-radius:8px; background:transparent;
+   color:#6e7681; font-size:1.2rem; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;
+   transition:color .15s, background .15s, transform .1s; }
+ .star:hover, .star:focus-visible { color:#f2cc60; background:#21262d; outline:none; }
+ .star:active { transform:scale(.88); }
+ .star[aria-pressed="true"] { color:#f2cc60; }
+ .item.is-fav .card { border-color:#5a4a1a; }
+
+ footer { color:#8b949e; font-size:.8rem; margin-top:1.4em; text-align:center; }
+</style>
+</head>
+<body>
+<main>
+<div class="avatar">OJ</div>
+<h1>Osten Jap</h1>
+<p class="tag">Everything I build — one click away</p>
+<input id="q" type="search" placeholder="Find a site…">
+<h2>🚀 Products</h2>
+<a class="card" href="https://campaign.techno-wanderlust.com/signals/" target="_blank" rel="noopener"><span class="t">Buyer Signals 🔒</span><span class="d">Purchase-intent radar · sign-in</span><span class="chev">›</span></a>
+<a class="card" href="https://campaign.techno-wanderlust.com/kpi/" target="_blank" rel="noopener"><span class="t">Bunny KPI 🔒</span><span class="d">Bunny metrics dashboard · sign-in</span><span class="chev">›</span></a>
+<h2>📋 CRMs &amp; Mission Control</h2>
+<a class="card" href="https://campaign.techno-wanderlust.com/berlin-v2/" target="_blank" rel="noopener"><span class="t">Berlin CRM V2 🔒</span><span class="d">Berlin outreach CRM · sign-in</span><span class="chev">›</span></a>
+<a class="card" href="https://campaign.techno-wanderlust.com/berlin-sme/" target="_blank" rel="noopener"><span class="t">BerlinSME-UGC 🔒</span><span class="d">SME pilot tracker · sign-in</span><span class="chev">›</span></a>
+<a class="card" href="https://campaign.techno-wanderlust.com/maps-crm/" target="_blank" rel="noopener"><span class="t">Maps CRM 🔒</span><span class="d">Second CRM instance · sign-in</span><span class="chev">›</span></a>
+<a class="card" href="https://campaign.techno-wanderlust.com/progress/" target="_blank" rel="noopener"><span class="t">Mission Control 🔒</span><span class="d">Progress dashboard · sign-in</span><span class="chev">›</span></a>
+<h2>🛠 Outreach &amp; Intelligence</h2>
+<a class="card" href="https://campaign.techno-wanderlust.com/outreach/" target="_blank" rel="noopener"><span class="t">Vendor Outreach Cockpit</span><span class="d">EU recovery wearable — 10 tailored vendor emails</span><span class="chev">›</span></a>
+<a class="card" href="https://campaign.techno-wanderlust.com/comments/targets.html" target="_blank" rel="noopener"><span class="t">LinkedIn Comment Board</span><span class="d">Daily radar comment targets, auto-updated</span><span class="chev">›</span></a>
+<a class="card" href="https://campaign.techno-wanderlust.com/comments/" target="_blank" rel="noopener"><span class="t">LinkedIn Comment Playbook</span><span class="d">Strategy + humanized comment drafts</span><span class="chev">›</span></a>
+<h2>🤖 AI Workspace</h2>
+<a class="card" href="https://ui.techno-wanderlust.com/" target="_blank" rel="noopener"><span class="t">Open WebUI</span><span class="d">The AI assistant fork — chat, tools, memory</span><span class="chev">›</span></a>
+<h2>🏠 Main</h2>
+<a class="card" href="https://www.techno-wanderlust.com/" target="_blank" rel="noopener"><span class="t">techno-wanderlust.com</span><span class="d">Osten Jap — engineer &amp; indie hacker</span><span class="chev">›</span></a>
+<h2>⚙ Internal ops</h2>
+<a class="card" href="http://178.105.191.249:3001/" target="_blank" rel="noopener"><span class="t">Uptime Kuma 🔒</span><span class="d">Service monitoring dashboard · sign-in</span><span class="chev">›</span></a>
+<footer>12 properties · all links verified live 2026-10-08 · maintained by Hermes · n8n (127.0.0.1:5678) is local-only</footer>
+</main>
+<script>
+(function () {
+  var KEY = 'links.favourites';
+  var main = document.querySelector('main');
+  var q = document.getElementById('q');
+
+  // Favourites are stored per browser (localStorage), keyed by link URL.
+  var favs = [];
+  try { favs = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) {}
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(favs)); } catch (e) {} }
+
+  // Wrap every card so a star button can sit beside the link (a button inside an <a> is invalid).
+  function addStar(item) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'star';
+    b.textContent = '★';
+    item.appendChild(b);
+    return b;
+  }
+  var items = [];
+  Array.prototype.forEach.call(main.querySelectorAll('a.card'), function (card) {
+    var item = document.createElement('div');
+    item.className = 'item';
+    card.parentNode.insertBefore(item, card);
+    item.appendChild(card);
+    item.dataset.href = card.getAttribute('href');
+    addStar(item);
+    items.push(item);
+  });
+  var byHref = {};
+  items.forEach(function (i) { byHref[i.dataset.href] = i; });
+
+  // Favourites section, shown above the groups while it has entries.
+  var favHead = document.createElement('h2');
+  favHead.className = 'favs';
+  favHead.textContent = '⭐ Favourites';
+  main.insertBefore(favHead, q.nextSibling);
+  var clones = [];
+
+  function toggle(href) {
+    var i = favs.indexOf(href);
+    if (i === -1) favs.push(href); else favs.splice(i, 1);
+    save();
+    render();
+  }
+
+  function render() {
+    clones.forEach(function (c) { c.remove(); });
+    clones = [];
+    var anchor = favHead;
+    favs = favs.filter(function (h) { return byHref[h]; });
+    favs.forEach(function (href) {
+      var clone = byHref[href].cloneNode(true);
+      clone.classList.add('fav-clone');
+      anchor.parentNode.insertBefore(clone, anchor.nextSibling);
+      anchor = clone;
+      clones.push(clone);
+    });
+    items.forEach(function (item) {
+      var on = favs.indexOf(item.dataset.href) !== -1;
+      item.classList.toggle('is-fav', on);
+    });
+    main.querySelectorAll('.star').forEach(function (b) {
+      var item = b.parentNode;
+      var on = favs.indexOf(item.dataset.href) !== -1;
+      var name = item.querySelector('.t').textContent.trim();
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.setAttribute('aria-label', (on ? 'Remove from favourites: ' : 'Add to favourites: ') + name);
+      b.title = on ? 'Remove from favourites' : 'Add to favourites';
+    });
+    filter();
+  }
+
+  main.addEventListener('click', function (e) {
+    var b = e.target.closest('.star');
+    if (b) toggle(b.parentNode.dataset.href);
+  });
+
+  // Search across all cards (including the favourites copies); hide headings with nothing under them.
+  function filter() {
+    var v = q.value.toLowerCase();
+    main.querySelectorAll('.item').forEach(function (c) {
+      c.style.display = c.innerText.toLowerCase().indexOf(v) !== -1 ? '' : 'none';
+    });
+    main.querySelectorAll('h2').forEach(function (g) {
+      var h = g.nextElementSibling, n = 0;
+      while (h && h.tagName !== 'H2' && h.tagName !== 'FOOTER') {
+        if (h.classList.contains('item') && h.style.display !== 'none') n++;
+        h = h.nextElementSibling;
+      }
+      g.style.display = n ? '' : 'none';
+    });
+  }
+  q.addEventListener('input', filter);
+
+  render();
+})();
+</script>
+</body>
+</html>

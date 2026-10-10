@@ -1,0 +1,33 @@
+[Unit]
+Description=Hermes Agent Gateway - Samatha (LinkedIn social media manager, own Telegram bot)
+After=network-online.target hermes-gateway.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/lib/hermes-agent/venv/bin/python -m hermes_cli.main gateway run
+WorkingDirectory=/root/samatha
+Environment="HOME=/root"
+Environment="USER=root"
+Environment="LOGNAME=root"
+Environment="PATH=/usr/local/lib/hermes-agent/venv/bin:/usr/local/lib/hermes-agent/node_modules/.bin:/root/.hermes/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="VIRTUAL_ENV=/usr/local/lib/hermes-agent/venv"
+Environment="HERMES_HOME=/root/.hermes/profiles/samatha"
+# Refuse to start without Samatha's own token (never fall back to Plank's).
+ExecStartPre=/bin/sh -c 'a=$$(grep -E "^TELEGRAM_BOT_TOKEN=.{20,}" /root/.hermes/profiles/samatha/.env) && b=$$(grep "^TELEGRAM_BOT_TOKEN=" /root/.hermes/.env) && [ "$$a" != "$$b" ]'
+Restart=on-failure
+RestartSec=10
+RestartForceExitStatus=75
+KillMode=mixed
+KillSignal=SIGTERM
+ExecReload=/bin/kill -USR1 $MAINPID
+TimeoutStopSec=60
+MemoryMax=400M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
