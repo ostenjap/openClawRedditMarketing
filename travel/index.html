@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Travel Plans</title>
+<link rel="icon" href="https://ui.techno-wanderlust.com/static/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --background: #ffffff;
+    --foreground: #09090b;
+    --muted: #f4f4f5;
+    --muted-foreground: #71717a;
+    --border: #e4e4e7;
+    --card: #ffffff;
+    --ring: #a1a1aa;
+    --line: #d4d4d8;
+    --grid: #f4f4f5;
+    --overlay: rgba(9, 9, 11, 0.45);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #09090b;
+      --foreground: #fafafa;
+      --muted: #18181b;
+      --muted-foreground: #a1a1aa;
+      --border: #27272a;
+      --card: #0c0c0e;
+      --ring: #52525b;
+      --line: #3f3f46;
+      --grid: #18181b;
+      --overlay: rgba(0, 0, 0, 0.7);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 820px; margin: 0 auto; padding: 56px 16px 64px; }
+  h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+  .lead { color: var(--muted-foreground); margin: 4px 0 28px; font-size: 15px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) + 2px);
+    padding: 20px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  /* Tabs */
+  .tabs {
+    display: inline-flex;
+    background: var(--muted);
+    border-radius: var(--radius);
+    padding: 4px;
+    gap: 2px;
+    max-width: 100%;
+  }
+  .tab {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted-foreground);
+    font: inherit;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: calc(var(--radius) - 3px);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color .15s, background .15s, box-shadow .15s;
+  }
+  .tab:hover { color: var(--foreground); }
+  .tab[aria-selected="true"] {
+    background: var(--background);
+    color: var(--foreground);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+  .tab:focus-visible, .trip:focus-visible, .close:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  .count {
+    font-size: 11px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--foreground);
+    display: inline-grid;
+    place-items: center;
+  }
+
+  /* Timeline */
+  .timeline { margin-top: 28px; }
+  .axis {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    color: var(--muted-foreground);
+    font-size: 12px;
+    text-align: center;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--line);
+  }
+  .axis span { position: relative; }
+  .axis > span::after, .axis > span:last-child::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -16px;
+    width: 2px;
+    height: 10px;
+    margin-left: -1px;
+    background: var(--line);
+    border-radius: 1px;
+  }
+  .axis > span:last-child::before { left: auto; right: 0; margin: 0 -1px 0 0; }
+  .axis .s { display: none; }
+  .lanes {
+    margin-top: 6px;
+    background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px);
+    background-size: calc(100% / 12) 100%;
+  }
+  .lane { position: relative; height: 48px; }
+  .trip {
+    position: absolute;
+    top: 10px;
+    height: 34px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--foreground);
+    font: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .trip .bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--c);
+    transition: height .15s, filter .15s;
+  }
+  .trip .name {
+    position: absolute;
+    top: 14px;
+    left: 0;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .trip .when { color: var(--muted-foreground); font-weight: 400; margin-left: 6px; }
+  .trip.ar .name { left: auto; right: 0; }
+  .trip:hover .bar { filter: brightness(1.1); }
+  .trip:hover .name { text-decoration: underline; text-underline-offset: 3px; }
+  .empty {
+    height: 48px;
+    display: grid;
+    place-items: center;
+    color: var(--muted-foreground);
+    font-size: 13px;
+  }
+  .hint { color: var(--muted-foreground); font-size: 13px; margin: 20px 0 0; }
+
+  @media (max-width: 520px) {
+    .page { padding-top: 32px; }
+    .card { padding: 16px; }
+    .tabs { display: flex; }
+    .tab { flex: 1; justify-content: center; padding: 6px 4px; }
+    .axis .l { display: none; }
+    .axis .s { display: inline; }
+    .trip .when { display: none; }
+  }
+
+  /* Dialog */
+  dialog {
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) + 2px);
+    background: var(--background);
+    color: var(--foreground);
+    padding: 24px;
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    box-shadow: 0 10px 38px -10px rgba(0, 0, 0, 0.35), 0 10px 20px -15px rgba(0, 0, 0, 0.2);
+  }
+  dialog::backdrop { background: var(--overlay); backdrop-filter: blur(2px); }
+  dialog[open] { animation: pop .16s ease-out; }
+  @keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+  .close {
+    position: absolute;
+    top: 14px; right: 14px;
+    width: 30px; height: 30px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+  }
+  .close:hover { background: var(--muted); color: var(--foreground); }
+  .d-head { display: flex; align-items: center; gap: 10px; padding-right: 32px; }
+  .d-dot { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .d-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 18px; }
+  .badge {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge.solid { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+  .section { margin-top: 16px; }
+  .section h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .section p { margin: 0; }
+  .stops { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); }
+  .stops li { padding: 10px 12px; border-top: 1px solid var(--border); }
+  .stops li:first-child { border-top: 0; }
+  .stops b { font-weight: 600; }
+  .stops .n { color: var(--muted-foreground); font-size: 12px; margin-left: 4px; }
+  .stops .t { display: block; color: var(--muted-foreground); margin-top: 2px; }
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>Travel plans</h1>
+  <p class="lead">The big trips, 2027 to 2030. Click a trip to see the plan.</p>
+
+  <section class="card">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="timeline">
+      <div class="axis" id="axis"></div>
+      <div class="lanes" id="lanes"></div>
+    </div>
+  </section>
+  <p class="hint">Want to come along? Let me know.</p>
+</main>
+
+<dialog id="dlg" aria-labelledby="d-title">
+  <button class="close" id="close" aria-label="Close">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+  <div id="d-body"></div>
+</dialog>
+
+<script>
+// ---- Add or change trips here. Months are 1 (Jan) to 12 (Dec). ----
+var TRIPS = [
+  {
+    title: "Italy + Ischia",
+    year: 2027, from: 9, to: 9,
+    color: "#10b981",
+    length: "about 2.5 weeks",
+    budget: "about EUR 2,800 per person",
+    stops: [
+      ["Rome", "3 nights", "Colosseum and Forum, Vatican Museums early morning, dinner in Trastevere."],
+      ["Florence", "3 nights", "Uffizi, climb the Duomo, sunset at Piazzale Michelangelo, a day in the Chianti hills."],
+      ["Amalfi Coast", "3 nights", "Base in Praiano, ferry to Positano, hike the Path of the Gods."],
+      ["Ischia", "5 nights", "Slow island days: thermal gardens (Negombo, Poseidon), Aragonese Castle, beach at Sant'Angelo, boat around the island."]
+    ],
+    getting: "Fly into Rome, Frecciarossa to Florence, train to Naples or Salerno, ferry along the coast and over to Ischia. Fly home from Naples.",
+    todo: "Book Vatican and Uffizi tickets early. Reserve Ischia and Amalfi stays by spring 2027."
+  },
+  {
+    title: "Japan",
+    year: 2028, from: 3, to: 4,
+    color: "#f43f5e",
+    length: "about 2.5 weeks, cherry blossom season",
+    budget: "about EUR 3,500 per person",
+    stops: [
+      ["Tokyo", "6 nights", "Shibuya, Asakusa, teamLab, Ueno park for the blossoms."],
+      ["Hakone", "2 nights", "Ryokan with an onsen, Mt Fuji views if the sky is clear."],
+      ["Kyoto", "6 nights", "Fushimi Inari at dawn, Philosopher's Path, day trip to Nara."],
+      ["Osaka", "3 nights", "Street food in Dotonbori, fly home from KIX."]
+    ],
+    getting: "Fly into Tokyo, Shinkansen between cities. Check if a JR Pass is still worth it.",
+    todo: "Book the ryokan about 6 months ahead. Blossom forecast comes out in January."
+  },
+  {
+    title: "Vietnam + Thailand",
+    year: 2030, from: 1, to: 2,
+    color: "#0ea5e9",
+    length: "about 6 weeks, dry season",
+    budget: "about EUR 3,000 per person",
+    stops: [
+      ["Northern Vietnam", "", "Hanoi old quarter, overnight boat in Ha Long or Lan Ha Bay."],
+      ["Central Vietnam", "", "Hoi An lanterns and a tailor, motorbike over the Hai Van Pass."],
+      ["Thailand", "", "Bangkok temples, cooking class in Chiang Mai, islands around Krabi to finish."]
+    ],
+    getting: "Open-jaw flight into Hanoi, out of Krabi or Phuket. Cheap local flights in between.",
+    todo: "Vietnam e-visa. Avoid travel days around Tet (early Feb 2030)."
+  }
+];
+// --------------------------------------------------------------------
+
+var YEARS = [2027, 2028, 2029, 2030];
+var M_LONG = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+var M_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+var tabs = document.getElementById("tabs");
+var lanesEl = document.getElementById("lanes");
+var dlg = document.getElementById("dlg");
+var body = document.getElementById("d-body");
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+function when(t) {
+  return t.from === t.to ? M_LONG[t.from - 1] + " " + t.year
+                         : M_LONG[t.from - 1] + " – " + M_LONG[t.to - 1] + " " + t.year;
+}
+function tripsIn(y) { return TRIPS.filter(function (t) { return t.year === y; }); }
+
+document.getElementById("axis").innerHTML = M_SHORT.map(function (m) {
+  return "<span><span class='l'>" + m + "</span><span class='s'>" + m[0] + "</span></span>";
+}).join("");
+
+YEARS.forEach(function (y) {
+  var b = document.createElement("button");
+  b.className = "tab";
+  b.setAttribute("role", "tab");
+  b.dataset.year = y;
+  var n = tripsIn(y).length;
+  b.innerHTML = y + (n ? " <span class='count'>" + n + "</span>" : "");
+  b.addEventListener("click", function () { show(y); history.replaceState(null, "", "#" + y); });
+  tabs.appendChild(b);
+});
+
+function shortWhen(t) {
+  return t.from === t.to ? M_SHORT[t.from - 1] : M_SHORT[t.from - 1] + " – " + M_SHORT[t.to - 1];
+}
+
+// Put each trip in the first lane where it (and its label) fits; otherwise start a new lane.
+function layout(list) {
+  var lanes = [];
+  list.slice().sort(function (a, b) { return a.from - b.from || b.to - a.to; }).forEach(function (t) {
+    var right = t.from >= 10;
+    var start = right ? Math.min(t.from, t.to - 2) : t.from;
+    var end = right ? t.to : Math.max(t.to, t.from + 2);
+    for (var i = 0; i < lanes.length; i++) {
+      if (lanes[i].end < start) break;
+    }
+    if (i === lanes.length) lanes.push({ end: 0, trips: [] });
+    lanes[i].end = end;
+    lanes[i].trips.push({ t: t, right: right });
+  });
+  return lanes;
+}
+
+function show(year) {
+  Array.prototype.forEach.call(tabs.children, function (b) {
+    b.setAttribute("aria-selected", String(+b.dataset.year === year));
+  });
+  lanesEl.innerHTML = "";
+  var list = tripsIn(year);
+  if (!list.length) {
+    lanesEl.innerHTML = "<div class='empty'>Nothing planned yet</div>";
+    return;
+  }
+  layout(list).forEach(function (lane) {
+    var row = document.createElement("div");
+    row.className = "lane";
+    lane.trips.forEach(function (it) {
+      var t = it.t;
+      var b = document.createElement("button");
+      b.className = "trip" + (it.right ? " ar" : "");
+      b.style.setProperty("--c", t.color);
+      b.style.left = "calc(" + ((t.from - 1) / 12 * 100) + "% + 3px)";
+      b.style.width = "calc(" + ((t.to - t.from + 1) / 12 * 100) + "% - 6px)";
+      b.setAttribute("aria-label", t.title + ", " + when(t));
+      b.innerHTML = "<span class='bar'></span><span class='name'>" + esc(t.title) +
+                    "<span class='when'>" + shortWhen(t) + "</span></span>";
+      b.addEventListener("click", function () { open(t); });
+      row.appendChild(b);
+    });
+    lanesEl.appendChild(row);
+  });
+}
+
+function open(t) {
+  var stops = t.stops.map(function (s) {
+    return "<li><b>" + esc(s[0]) + "</b>" + (s[1] ? "<span class='n'>" + esc(s[1]) + "</span>" : "") +
+           "<span class='t'>" + esc(s[2]) + "</span></li>";
+  }).join("");
+  body.innerHTML =
+    "<div class='d-head'><span class='d-dot' style='background:" + t.color + "'></span>" +
+    "<h2 class='d-title' id='d-title'>" + esc(t.title) + "</h2></div>" +
+    "<div class='badges'><span class='badge solid'>" + when(t) + "</span>" +
+    "<span class='badge'>" + esc(t.length) + "</span><span class='badge'>" + esc(t.budget) + "</span></div>" +
+    "<div class='section'><h4>Stops</h4><ul class='stops'>" + stops + "</ul></div>" +
+    "<div class='section'><h4>Getting around</h4><p>" + esc(t.getting) + "</p></div>" +
+    "<div class='section'><h4>To do</h4><p>" + esc(t.todo) + "</p></div>";
+  dlg.showModal();
+}
+
+document.getElementById("close").addEventListener("click", function () { dlg.close(); });
+dlg.addEventListener("click", function (e) {
+  if (e.target !== dlg) return;
+  var r = dlg.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+});
+
+var start = parseInt(location.hash.slice(1), 10);
+show(YEARS.indexOf(start) >= 0 ? start : YEARS[0]);
+</script>
+</body>
+</html>
