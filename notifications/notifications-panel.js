@@ -4,7 +4,7 @@
  * first under Search. Also keeps an unread badge on that row (polls every 60 s while the page is visible).
  * Data: GET  /kanban-api/notifications           -> `ceo alerts --json` (host service kanban-board.service, admin only)
  *       POST /kanban-api/notifications {action: read|dismiss, key | all}
- * Alerts come from the CEO engine (/root/ceo/ceo.py): budget first (weekly AI budget, per-agent allowances, OpenRouter
+ * The Budget cards live in the Mission tab (under Health). Alerts come from the CEO engine (/root/ceo/ceo.py): budget first (weekly AI budget, per-agent allowances, OpenRouter
  * key floor + runway), then CEO decisions waiting for the founder. Critical ones also go to Telegram once.
  * Plain DOM, textContent only (never innerHTML with data). Colours come from the shared --cv-* vars.
  */
@@ -28,17 +28,6 @@
 	var CSS =
 		'.nt-body{max-width:56rem;margin:0 auto;padding:.25rem .25rem 2rem}' +
 		'.nt-h{display:flex;align-items:center;gap:.5rem;margin:1.5rem .25rem .5rem;font-size:1.125rem;line-height:1.3;font-weight:600;color:var(--cv-name)}' +
-		'.nt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.5rem}' +
-		'.nt-card{padding:.625rem .75rem;border-radius:.75rem;background:var(--cv-mono-bg);min-width:0}' +
-		'.nt-card .k{font-size:.6875rem;color:var(--cv-meta)}' +
-		'.nt-card .v{font-size:.9375rem;color:var(--cv-name);margin-top:.125rem}' +
-		'.nt-card .s{font-size:.6875rem;color:var(--cv-meta);margin-top:.125rem;overflow-wrap:anywhere}' +
-		'.nt-bar{height:.375rem;border-radius:9999px;background:var(--cv-line);margin-top:.5rem;overflow:hidden}' +
-		'.nt-bar>i{display:block;height:100%;border-radius:9999px;background:var(--cv-ok)}' +
-		'.nt-bar>i.warn{background:var(--cv-warn-fg)}.nt-bar>i.crit{background:var(--cv-err)}' +
-		'.nt-agents{display:flex;flex-wrap:wrap;gap:.375rem;margin-top:.5rem}' +
-		'.nt-agent{display:inline-flex;align-items:center;gap:.375rem;padding:.125rem .5rem;border-radius:.625rem;background:var(--cv-mono-bg);font-size:.75rem;color:var(--cv-name)}' +
-		'.nt-agent.over{background:var(--cv-warn-bg);color:var(--cv-warn-fg)}' +
 		'.nt-tools{display:flex;align-items:center;gap:.5rem;margin:1.25rem .25rem .25rem}' +
 		'.nt-list{display:grid;gap:.125rem;margin:.25rem 0}' +
 		'.nt-row{display:flex;align-items:flex-start;gap:.625rem;padding:.5rem .5rem;border-radius:.75rem;transition:background-color .15s}' +
@@ -101,8 +90,6 @@
 		return Math.round(s / 86400) + 'd ago';
 	}
 
-	function money(v) { return v == null ? '–' : '$' + Number(v).toFixed(2); }
-
 	/* ---------------- sidebar badge (works even while the panel is closed) ---------------- */
 	function ensureBadgeStyle() {
 		if (document.getElementById('notif-badge-style')) return;
@@ -157,46 +144,6 @@
 	}
 
 	/* ---------------- panel ---------------- */
-	function bar(frac, level) {
-		var b = e('div', 'nt-bar');
-		var i = e('i', level || '');
-		i.style.width = Math.max(2, Math.min(100, Math.round(frac * 100))) + '%';
-		b.appendChild(i);
-		return b;
-	}
-
-	function card(k, v, s) {
-		var c = e('div', 'nt-card');
-		c.appendChild(e('div', 'k', k));
-		c.appendChild(e('div', 'v', v));
-		if (s) c.appendChild(e('div', 's', s));
-		return c;
-	}
-
-	function renderBudget(bd) {
-		els.body.appendChild(e('h2', 'nt-h', 'Budget'));
-		var g = e('div', 'nt-grid');
-		var frac = bd.total ? bd.spent / bd.total : 0;
-		var c1 = card('This week (' + bd.week + ')', money(bd.spent) + ' of $' + bd.total,
-			bd.projected != null ? 'On pace for ' + money(bd.projected) : 'Too early to project');
-		c1.appendChild(bar(frac, frac >= 1 ? 'crit' : frac >= 0.8 ? 'warn' : ''));
-		g.appendChild(c1);
-		if (bd.key_remaining != null) {
-			var rem = Number(bd.key_remaining), lim = Number(bd.key_limit) || 0;
-			var c2 = card('OpenRouter key', money(rem) + ' left of $' + lim,
-				'Resets ' + (bd.key_reset || '–') + '. Hard ceiling for every agent, Plank included.');
-			c2.appendChild(bar(lim ? rem / lim : 0, bd.key_low ? 'crit' : lim && rem / lim < 0.25 ? 'warn' : ''));
-			g.appendChild(c2);
-		}
-		els.body.appendChild(g);
-		var ag = e('div', 'nt-agents');
-		Object.keys(bd.alloc || {}).forEach(function (k) {
-			var sp = (bd.by_agent || {})[k] || 0, al = bd.alloc[k] || 0;
-			ag.appendChild(e('span', 'nt-agent' + (sp > al && sp > 0.01 ? ' over' : ''), k + ' ' + money(sp) + ' / ' + money(al)));
-		});
-		els.body.appendChild(ag);
-	}
-
 	function act(a, action) {
 		if (pending[a.key]) return;
 		pending[a.key] = true;
@@ -261,7 +208,7 @@
 			if (!loadError) els.body.appendChild(e('div', 'nt-empty', 'Loading…'));
 			return;
 		}
-		if (data.budget) renderBudget(data.budget);
+		/* the Budget cards moved to the Mission tab (under Health) on 2026-10-11; budget ALERTS stay here */
 
 		var pass = function (a) { return filter === 'all' || a.source === filter; };
 		var active = (data.active || []).filter(pass);
