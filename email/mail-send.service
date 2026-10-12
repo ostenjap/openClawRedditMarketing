@@ -1,0 +1,14 @@
+[Unit]
+Description=Mail API for the ui.techno-wanderlust.com Email panel
+After=network.target docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /root/mail-send/mail_send_api.py
+Restart=on-failure
+RestartSec=5
+MemoryMax=100M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
