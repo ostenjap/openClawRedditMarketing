@@ -1267,8 +1267,32 @@ REFINE_SYSTEM = (
     "4. Fix what makes drafts feel fake: hype, dramatic rhetorical hooks, tidy 'insight' lines, clichés, over-polished phrasing, "
     "lists of three adjectives. Prefer plain first-person words, specific details from the raw idea, short sentences, a little roughness.\n"
     "5. Keep roughly the same length unless told otherwise. No hashtags or links unless the post already has them. English.\n"
+    "6. The founder may point at lines as L1, L2, ... (see NUMBERED LINES; blank lines are not numbered). Change exactly the lines "
+    "they name the way they ask, and leave the other lines as they are unless the instruction is about the whole post. "
+    "Never put line numbers in your output.\n"
     'Return ONLY JSON: {"text":"the full revised post","lesson":"ONE general, reusable writing rule this correction teaches '
     '(imperative, max 20 words, e.g. \\"Never open with a rhetorical question.\\") or an empty string if the correction was only about this post\'s facts"}')
+
+
+LINE_REF_RE = re.compile(r"^\s*L\d{1,3}\s*[:.|)\]-]\s?")
+
+
+def numbered_lines(text):
+    """L1, L2, ... over NON-EMPTY lines (the panel's gutter uses the same rule, so references match)."""
+    out, n = [], 0
+    for line in (text or "").split("\n"):
+        if line.strip():
+            n += 1
+            out.append(f"L{n}: {line}")
+    return "\n".join(out)
+
+
+def strip_line_refs(text):
+    """Safety net: if the editor echoed 'L3: ...' prefixes on every line, remove them."""
+    lines = [l for l in text.split("\n") if l.strip()]
+    if lines and all(LINE_REF_RE.match(l) for l in lines):
+        return "\n".join(LINE_REF_RE.sub("", l) if l.strip() else l for l in text.split("\n"))
+    return text
 
 
 def correction_lessons_block(con, user_id):
@@ -1364,6 +1388,7 @@ def refine_draft(draft_id: int, body: RefineIn, user=Depends(get_verified_user))
               f"{notes_block}"
               f"FOUNDER EDITS (made by hand since your last version; keep them):\n{diff_summary(ai, text)}\n\n"
               f"CURRENT POST (this is what the founder sees now, including their edits):\n{text}\n\n"
+              f"NUMBERED LINES (same post; how the founder refers to lines):\n{numbered_lines(text)}\n\n"
               f"FOUNDER'S INSTRUCTION:\n{instruction}\n\nReturn the JSON now.")
     try:
         res = gw_complete(REFINE_SYSTEM, prompt, max_tokens=1800, temperature=0.5, tag="refine")
@@ -1373,9 +1398,9 @@ def refine_draft(draft_id: int, body: RefineIn, user=Depends(get_verified_user))
         raise HTTPException(502, f"The editor could not be reached: {e}")
     data = parse_json(res["text"])
     if isinstance(data, dict) and data.get("text"):
-        new_text, lesson = clean_post(str(data["text"])), str(data.get("lesson") or "").strip().strip('"')[:220]
+        new_text, lesson = clean_post(strip_line_refs(str(data["text"]))), str(data.get("lesson") or "").strip().strip('"')[:220]
     else:  # model ignored the JSON format: use the raw reply as the post, no lesson
-        new_text, lesson = clean_post(res["text"]), ""
+        new_text, lesson = clean_post(strip_line_refs(res["text"])), ""
     if len(new_text) < 100:
         raise HTTPException(502, "The editor returned an unusable reply; try again with a clearer instruction.")
     with db() as con:

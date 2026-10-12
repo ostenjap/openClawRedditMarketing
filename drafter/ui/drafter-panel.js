@@ -164,6 +164,11 @@
 		'.dr-notes-grp>span{font-size:.6875rem;color:var(--cv-meta);min-width:3.5rem}' +
 		'.dr-used{font-size:.75rem;color:var(--cv-meta);margin:.25rem 0 .5rem;white-space:pre-wrap;overflow-wrap:anywhere}' +
 		'.dr-used b{font-weight:500;color:var(--cv-name)}' +
+		'.dr-lnwrap{position:relative}' +
+		'.dr-lnwrap>textarea.dr-input{padding-left:2.625rem}' +
+		'.dr-gutter{position:absolute;left:0;top:0;bottom:0;width:2.25rem;overflow:hidden;pointer-events:none;border-radius:1rem 0 0 1rem}' +
+		'.dr-gutter>span{position:absolute;right:.375rem;font-size:.6875rem;color:var(--cv-meta);opacity:.8;font-variant-numeric:tabular-nums;user-select:none}' +
+		'.dr-lnmirror{position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;white-space:pre-wrap;overflow-wrap:break-word;height:auto!important;resize:none}' +
 		'@media (max-width:767px){.dr-col{padding-bottom:5rem}.dr-grid{grid-template-columns:repeat(2,1fr)}}';
 
 	/* ------------------------------------------------------------ build */
@@ -708,7 +713,7 @@
 			if (w) {
 				var best = draftCard(w, r, true);
 				box.appendChild(best);
-				if (si === 0) box.appendChild(correctionCard(w, best));
+				box.appendChild(correctionCard(w, best));
 				var why = e('details', 'dr-det');
 				why.open = true;
 				var sum = e('summary', null, 'Why it won');
@@ -755,9 +760,14 @@
 		ta.setAttribute('aria-label', 'Best draft text');
 		setTimeout(function () { autosize(ta); }, 0);
 		ta.addEventListener('input', function () { autosize(ta); sv.disabled = false; sv.textContent = 'Save edit'; });
-		c.appendChild(ta);
+		var ln = lineNumbers(ta);
+		c.appendChild(ln.el);
+		setTimeout(ln.refresh, 0);
 		var chars = e('div', 'dr-hint');
-		function upd() { chars.textContent = ta.value.length + ' characters · LinkedIn cuts the preview after roughly two lines, so the first lines are your hook'; }
+		function upd() {
+			chars.textContent = ta.value.length + ' characters · L1, L2… number the lines, so you can say "L3 is too dramatic" in the correction box · LinkedIn cuts the preview after roughly two lines, so the first lines are your hook';
+			ln.refresh();
+		}
 		upd(); ta.addEventListener('input', upd);
 		var row = e('div', 'dr-row');
 		row.appendChild(btn('Copy', 'primary', function (ev) { copyText(ta.value, ev.currentTarget); }));
@@ -792,6 +802,48 @@
 		return c;
 	}
 
+	/* Line-number gutter for a draft textarea. Numbers count NON-EMPTY lines only (blank lines between paragraphs are
+	 * skipped); the backend's numbered_lines() in /refine uses the same rule, so "L3" means the same line on both sides.
+	 * A hidden mirror with the textarea's width/font measures where each line starts once wrapping is applied. */
+	function lineNumbers(ta) {
+		var wrap = e('div', 'dr-lnwrap');
+		var gutter = e('div', 'dr-gutter');
+		gutter.setAttribute('aria-hidden', 'true');
+		var mirror = e('div', 'dr-input dr-lnmirror');
+		mirror.setAttribute('aria-hidden', 'true');
+		wrap.appendChild(ta);
+		wrap.appendChild(gutter);
+		wrap.appendChild(mirror);
+		function refresh() {
+			if (!ta.isConnected || !ta.clientWidth) return;
+			var cs = getComputedStyle(ta);
+			mirror.style.width = ta.clientWidth + 'px';
+			mirror.style.paddingLeft = cs.paddingLeft;
+			mirror.textContent = '';
+			var lines = ta.value.split('\n'), spans = [];
+			lines.forEach(function (l, i) {
+				var sp = document.createElement('span');
+				sp.textContent = l || '​';
+				mirror.appendChild(sp);
+				if (i < lines.length - 1) mirror.appendChild(document.createTextNode('\n'));
+				if (l.trim()) spans.push(sp);
+			});
+			gutter.textContent = '';
+			var lh = cs.lineHeight;
+			spans.forEach(function (sp, n) {
+				var g = document.createElement('span');
+				g.textContent = 'L' + (n + 1);
+				g.style.top = (sp.offsetTop - ta.scrollTop) + 'px';
+				g.style.lineHeight = lh;
+				gutter.appendChild(g);
+			});
+		}
+		ta.addEventListener('input', refresh);
+		ta.addEventListener('scroll', refresh);
+		if (window.ResizeObserver) new ResizeObserver(refresh).observe(ta);
+		return { el: wrap, refresh: refresh };
+	}
+
 	function draftDetails(d, dropped) {
 		var det = e('details', 'dr-det');
 		var s = e('summary');
@@ -818,18 +870,20 @@
 		['Out of context', 'Out of context: '],
 		['Less dramatic', 'Less dramatic, tone the hook down. '],
 		['Too long', 'Too long: cut it by about a third. '],
-		['More like me', 'More like me: plainer words, shorter sentences. ']
+		['More like me', 'More like me: plainer words, shorter sentences. '],
+		['Fix a line…', 'L1: '],
+		['Cut a line…', 'Cut L']
 	];
 
 	function correctionCard(d, best) {
 		var c = e('div', 'dr-card');
 		c.appendChild(e('h4', null, 'Polish correction'));
-		c.appendChild(e('div', 'dr-hint', 'Tell the AI what is off: too fake, out of context, a fact it missed. It rewrites the draft above, keeps any edits you typed, and remembers the lesson for future drafts.'));
+		c.appendChild(e('div', 'dr-hint', 'Tell the AI what is off: too fake, out of context, a fact it missed. Point at lines with L1, L2… (the numbers next to the draft). It rewrites the draft above, keeps any edits you typed, and remembers the lesson for future drafts.'));
 
 		var box = e('textarea', 'dr-input');
 		box.rows = 2; box.maxLength = 1500;
 		box.setAttribute('aria-label', 'What should the AI fix?');
-		box.placeholder = "btw this sounds fake, I'd never say 'brutal truth'. Out of context: signups aren't live yet, so no result claims.";
+		box.placeholder = "L1: too dramatic, say it plainly. L4: I'd never say 'brutal truth'. Cut L6. Out of context: signups aren't live yet, so no result claims.";
 		box.style.marginTop = '.375rem';
 		box.addEventListener('input', function () { autosize(box); });
 		c.appendChild(box);
