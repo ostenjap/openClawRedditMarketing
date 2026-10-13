@@ -16,6 +16,11 @@ engagement is reported only once there are >= 10 reviewed posts.
 Polish correction: the founder can tell the editor what is off; hand edits + a diff of them are sent along, every correction/edit is
 stored as a revision, one reusable lesson per correction goes into memory, and recent real edits are shown in later briefs.
 
+V3 (engine='v3', see V3_SPEC.md): Sonnet plans first (core line, audience, post type, hooks) and may ask the founder up to 3
+questions about missing facts (run status 'needs_input'), then writes 3 English drafts, checks them against the founder's
+standards checklist reading as the chosen audience, rewrites failures once, picks the best, writes a native German (du) version
+and a first comment for the link. One audience and one post type per post.
+
 Notes for the agent: each idea can carry short founder notes (tone, length, hook, include/avoid). They are snapshotted
 into the run and sent to the writer, the polish step and Polish correction, where they outrank the angle and format rules.
 
@@ -56,7 +61,12 @@ MAX_CALLS_PER_RUN = 36
 MAX_CALLS_PER_RUN_V2 = 60  # 12 writes + 6 scores + 18 matchups + 2 polish = 38, plus retries
 
 
-def max_calls(v2):
+MAX_CALLS_PER_RUN_V3 = 24  # plan + 3 writes + check + up to 3 fixes + recheck + German (write/check/fix/recheck) + comment, plus retries
+
+
+def max_calls(v2, engine=None):
+    if engine == "v3":
+        return MAX_CALLS_PER_RUN_V3
     return MAX_CALLS_PER_RUN_V2 if v2 else MAX_CALLS_PER_RUN
 # Writer steps use a non-reasoning model: glm-5.3-flash (reasoning forced low) intermittently burns
 # the whole completion budget on hidden reasoning and returns empty posts. Scoring/pair/polish stay
@@ -67,16 +77,25 @@ DISCLAIMER = "Simulated score: a heuristic for catching weak hooks, slop and off
 
 # --------------------------------------------------------------------------- defaults
 DEFAULT_BRIEF = """WHO I AM
-Solo founder in Berlin building Bunny Search: a tool that finds UGC creators on Instagram and TikTok by niche + city, scraped fresh on demand instead of stale $200-300/month databases. Pre-launch (Sept 2026), $0 MRR, a handful of warm leads. Previously built HackaMaps (a hackathon directory).
+Solo founder in Berlin building Bunny Search. Previously built HackaMaps (a hackathon directory).
 
-WHO I WRITE FOR (primary)
-Owners and growth/marketing leads of small, early-stage direct-to-consumer / e-commerce brands in DACH and Europe who source UGC creators themselves. Not agencies or UGC platforms (they are not the customer). Secondary: indie founders following build-in-public (they amplify, they don't buy).
+BUNNY SEARCH ONE-LINER (say this once per post, in natural words, meaning intact)
+Bunny Search finds UGC creators on Instagram and TikTok by niche and city, pulled fresh when you search instead of from a stale $300/month database.
+
+STATUS (October 2026)
+Live with payments since October 2026. $0 MRR, a handful of warm leads. I missed my September 2026 launch target.
+
+LINK (only for the first comment, never in the post body)
+[add your Bunny Search URL here]
+
+WHO I WRITE FOR
+One audience per post. Main buyer: owners and growth/marketing leads of small direct-to-consumer / e-commerce brands in DACH and Europe who source UGC creators themselves. Also: marketing agencies running creator campaigns, Berlin SMEs, and indie founders following build-in-public (they amplify, they rarely buy).
 
 WHAT THEY CARE ABOUT
 Finding real creators fast without paying for stale databases, avoiding fake followers, creators in the right country/audience, not losing hours to manual DMs, proof before spending.
 
-CONTENT PILLARS
-1) Creator-sourcing education for brands (how to vet UGC creators). 2) Build-in-public: honest progress and numbers. 3) Sharp opinions on creator-tool pricing and database staleness. 4) Concrete niche + city examples of fresh creator data.
+CONTENT PILLARS (rotate)
+1) Build in public: honest progress and real numbers. 2) Buyer insight: creator-sourcing problems, data and mistakes I see while building. 3) Engineer credibility: how it is built (fresh scraping, data quality, privacy). 4) Sharp opinions on creator-tool pricing and database staleness.
 
 VOICE
 Plain, specific, a bit dry. First person. Short sentences. Admit what is unfinished. No hype, no corporate speak, no "excited to announce". Honest numbers only; never invent customers, results or quotes.
@@ -98,6 +117,89 @@ ANGLES = [
     ("buildinpublic", "Build-in-public update: share the raw idea as an honest note from your week of building — what you tried, what changed, what is still unfinished. If the raw idea is a list of findings or features, present it as what you learned from actually using the thing. Use only facts that appear in the raw idea; if it contains no numbers, write it without numbers."),
     ("question", "Question-led: open with a sharp question the raw idea answers, then answer it briefly and invite replies."),
 ]
+
+# --------------------------------------------------------------------------- V3 (Sonnet) building blocks
+V3_MODEL = os.environ.get("DRAFTER_V3_MODEL") or "anthropic/claude-sonnet-5"
+AUDIENCES = {
+    "dtc": ("DTC brands", "Owners and growth/marketing leads of small direct-to-consumer / e-commerce brands in DACH and Europe who find "
+            "and contact UGC creators themselves. Their pain: hours lost hunting creators by hand, stale paid databases, fake followers, "
+            "creators in the wrong country. They answer questions about how they find, vet and pay creators."),
+    "agency": ("Agencies", "People at small marketing / influencer agencies who build creator shortlists for several client brands. "
+               "Their pain: a fresh shortlist for every new brief, proving creator fit to the client, many niches and cities at once. "
+               "They answer questions about their sourcing workflow and tools."),
+    "sme": ("Berlin SMEs", "Owners of local Berlin small businesses (cafes, studios, shops, services) who want local creators or content "
+            "but have no marketing team. Their pain: not knowing where to start, little time, small budgets. They answer simple, "
+            "practical questions about their own business."),
+    "founders": ("Founders", "Indie founders and solo builders who follow build-in-public. They amplify and give feedback but rarely "
+                 "buy. They answer questions about their own building habits, pricing and launches."),
+}
+POST_TYPES = {
+    "build": ("Build in public", "An honest update from building Bunny Search: what happened, real numbers, what is unfinished, "
+              "what you learned."),
+    "insight": ("Buyer insight", "Something useful for the chosen audience about THEIR problem (finding, vetting, working with "
+                "creators), drawn from what you see while building Bunny Search. The product is context, not the topic."),
+    "engineer": ("Engineer credibility", "How it is built: a technical decision, trade-off or problem you solved (fresh scraping, data "
+                 "quality, privacy, speed), explained so a non-technical buyer trusts the product more."),
+}
+STANDARDS = {
+    "hook": ("Hook = best line", "The single strongest line or insight of the post is in the first two lines (before 'see more'), "
+             "not buried in the middle."),
+    "brand": ("Says what Bunny Search is", "The post says what Bunny Search does, once, using the one-liner from the brief (natural "
+              "wording, meaning intact), speaks to the chosen audience's problem, and never reads like an ad."),
+    "ending": ("Easy closing question", "The last line is a concrete question with a short factual answer: yes/no, a choice "
+               "between two options, a number or a tool name (e.g. 'Did you charge from day one, or wait?'). A two-option question "
+               "passes only if each option is a plain fact about what the reader did or uses. It FAILS if answering needs "
+               "reflection or self-analysis ('What are you putting off?', 'Do you avoid the task you know or the one you don't?'), "
+               "or if it is a thank-you or journey closer."),
+    "truth": ("True, current, specific", "Every date fits TODAY (no past date presented as a future target). Every concrete detail "
+              "(numbers, durations, quotes, what a user said, named events, how something went) appears in the SOURCE FACTS; a "
+              "detail that is not there is invented and FAILS, even if it sounds harmless ('rewrote the function four times'). At "
+              "least one real concrete detail from the sources is used, and no vague stand-in hides a missing fact."),
+}
+V3_DISCLAIMER = ("Checks and scores come from Sonnet reading as your chosen audience. They are a quality bar, not a reach forecast; "
+                 "your real numbers in Review are what count.")
+V3_PLAN = (
+    "You are the founder's LinkedIn editor. Before anything is written, think the raw idea through and make a plan.\n"
+    "Decide: who this one post is for (keep the founder's audience and post type unless they say 'auto'), the single strongest "
+    "line, three different opening hooks that lead with it, the concrete facts to use (only facts that are in the sources), and "
+    "a closing question with a short factual answer (yes/no, one of two options, a number or a tool), e.g. 'Did you charge from "
+    "day one, or wait?'.\n"
+    "Then list what is MISSING: at most 3 short questions to the founder about facts that would make the post concrete or true "
+    "and that are NOT already in the idea, notes or brief (e.g. what exactly an early user said, a number, a date). Never ask "
+    "about style or tone. If nothing important is missing, return an empty list.\n"
+    'Return ONLY JSON: {"audience":"<key>","post_type":"<key>","reasoning":"2-4 sentences: who it is for, what the strongest '
+    'line is, what is missing","core_line":"...","hooks":["...","...","..."],"must_include":["..."],'
+    '"ending_question":"...","questions":[{"ask":"...","why":"max 12 words"}]}')
+V3_WRITER = (
+    "You ghost-write ONE LinkedIn post for one founder, in their voice, for the one reader described below.\n"
+    "The raw idea is the subject. Use only facts from the brief, the raw idea, the author's notes and the founder's answers; "
+    "never invent customers, quotes, numbers, durations, dates, events or colour details (no made-up 'rewrote it four times', "
+    "'fought webhooks for days', no user quote you were not given). When a fact is missing, say less instead of filling the gap.\n"
+    "Plain, specific, a bit dry, first person, short sentences, short paragraphs with line breaks. No hype, no corporate phrases, "
+    "no 'game-changer', no 'excited to announce', no 'Here's the thing', no lists of three adjectives, few em-dashes.\n"
+    "900-1,400 characters. No links in the body (the link goes in the first comment). At most 2 hashtags, only if natural; at "
+    "most one emoji. Meet every standard listed below. AUTHOR'S NOTES outrank the default format.\n"
+    "Output contract: reply with the post text only, starting with its first character. No preamble, no notes, no fences.")
+V3_CHECK = (
+    "You are a strict LinkedIn editor, and you also read as the target reader described below. Check each post against EVERY "
+    "listed standard. Pass only if the post clearly meets it. For 'truth', compare every concrete detail in the post with the "
+    "SOURCE FACTS and the brief: anything not there is invented. For each standard give pass true/false and 'why' (max 18 words; "
+    "quote the problem line when it fails). Then score the post 1-10 as the target reader (10 = I stop, read to the end and "
+    "reply) and give a one-sentence first-person reaction as that reader.\n"
+    'Return ONLY JSON: {"posts":{"A":{"checks":{"<standard key>":{"pass":true,"why":"..."}},"score":7,"reaction":"..."}}} '
+    "with one entry per post letter.")
+V3_FIX = (
+    "You are the founder's editor. Rewrite the post so it passes the failed standards listed, keeping everything that already "
+    "works: voice, facts, language, most of the wording. NEVER add a quote, number, duration, anecdote or detail that is not in "
+    "the brief, idea, notes or founder's answers, not even to pass a standard. If a detail failed as invented, remove it. If a "
+    "standard needs a fact you do not have (e.g. a real user quote), say less: use a true detail that IS available, or cut the "
+    "vague claim.\nOutput contract: the full revised post only, starting with its first character.")
+V3_COMMENT = (
+    "Write the founder's FIRST COMMENT under their own LinkedIn post, once in English and once in German (informal du). One or two "
+    "short sentences each: a plain pointer to Bunny Search with the link from the brief (section LINK). If the brief has no real "
+    "URL there, write [link]. No hype, no emoji, no hashtags.\n"
+    'Return ONLY JSON: {"en":"...","de":"..."}')
+
 
 AI_ISMS = re.compile(
     r"\b(game[- ]?chang\w*|delve\w*|unlock\w*|supercharg\w*|leverag\w*|in today'?s (fast[- ]paced|digital|competitive)|"
@@ -159,7 +261,15 @@ def db():
                     for table, col, ddl in (('learnings', 'kind', "ALTER TABLE learnings ADD COLUMN kind TEXT NOT NULL DEFAULT 'review'"),
                                             ('drafts', 'ai_text', 'ALTER TABLE drafts ADD COLUMN ai_text TEXT'),
                                             ('ideas', 'notes', "ALTER TABLE ideas ADD COLUMN notes TEXT NOT NULL DEFAULT ''"),
-                                            ('runs', 'notes', "ALTER TABLE runs ADD COLUMN notes TEXT NOT NULL DEFAULT ''")):
+                                            ('runs', 'notes', "ALTER TABLE runs ADD COLUMN notes TEXT NOT NULL DEFAULT ''"),
+                                            ('runs', 'engine', "ALTER TABLE runs ADD COLUMN engine TEXT NOT NULL DEFAULT ''"),
+                                            ('runs', 'meta', "ALTER TABLE runs ADD COLUMN meta TEXT"),
+                                            ('ideas', 'audience', "ALTER TABLE ideas ADD COLUMN audience TEXT NOT NULL DEFAULT ''"),
+                                            ('ideas', 'post_type', "ALTER TABLE ideas ADD COLUMN post_type TEXT NOT NULL DEFAULT ''"),
+                                            ('ideas', 'standards', "ALTER TABLE ideas ADD COLUMN standards TEXT"),
+                                            ('drafts', 'lang', "ALTER TABLE drafts ADD COLUMN lang TEXT NOT NULL DEFAULT 'en'"),
+                                            ('reviews', 'dms', "ALTER TABLE reviews ADD COLUMN dms INTEGER"),
+                                            ('reviews', 'signups', "ALTER TABLE reviews ADD COLUMN signups INTEGER")):
                         if col not in {r[1] for r in con.execute(f'PRAGMA table_info({table})')}:
                             con.execute(ddl)
                     con.commit()
@@ -258,6 +368,38 @@ def fake_complete(system, user, tag):
         time.sleep(delay)
     seed = zlib.crc32((tag + user[:200]).encode())
     rnd = random.Random(seed)
+    if tag.startswith("v3:plan"):
+        auto = "AUDIENCE SET BY THE FOUNDER: auto" in user
+        return {"text": json.dumps({"audience": "founders" if auto else re.search(r"AUDIENCE SET BY THE FOUNDER: (\w+)", user).group(1),
+                                    "post_type": "build", "reasoning": "Fake plan: the strongest line is the payment button one.",
+                                    "core_line": "As long as there is no payment button, the product is still potentially useful.",
+                                    "hooks": ["Adding payments took 2 hours.", "Avoiding it took 6 weeks.", "The button forces an answer."],
+                                    "must_include": ["Stripe took a week on HackaMaps"], "ending_question": "Did you charge from day one?",
+                                    "questions": [] if "NOQUESTIONS" in user else
+                                    [{"ask": "What did the early user actually say?", "why": "a real quote beats a summary"},
+                                     {"ask": "How many early users gave feedback?", "why": "a number makes it concrete"}]}), "cost": 0.0}
+    if tag.startswith("v3:write") or tag.startswith("v3:de"):
+        idx = tag.split(":")[-1]
+        de = tag.startswith("v3:de")
+        body = (("Zahlungen in Bunny Search haben 2 Stunden gedauert. " if de else f"Adding payments took 2 hours (draft {idx}). ")
+                + "\n\n" + ("Konkrete Details zählen. " if de else "Specifics matter here. ") * 20
+                + ("\n\nHast du ab Tag eins Geld verlangt?" if de else "\n\nDid you charge from day one, or wait?"))
+        return {"text": body, "cost": 0.0}
+    if tag.startswith("v3:check") or tag.startswith("v3:recheck"):
+        letters = sorted(set(re.findall(r"^\[([A-C])\]", user, re.M)))
+        keys = re.findall(r"^- (hook|brand|ending|truth):", system, re.M)
+        out = {}
+        for n, L in enumerate(letters):
+            fail = "truth" if (n == 1 and not tag.startswith("v3:recheck")) else None
+            out[L] = {"checks": {k: {"pass": k != fail, "why": "fake: no concrete detail" if k == fail else "fake ok"} for k in keys},
+                      "score": 8 - n, "reaction": f"As this reader I would read post {L} to the end."}
+        return {"text": json.dumps({"posts": out}), "cost": 0.0}
+    if tag.startswith("v3:fix"):
+        m = re.search(r"POST:\n(.*)\Z", user, re.S)
+        return {"text": (m.group(1) if m else "x" * 300).strip() + "\n\n[fixed: added a concrete detail]", "cost": 0.0}
+    if tag == "v3:comment":
+        return {"text": json.dumps({"en": "Bunny Search, if you want to try it: [link]", "de": "Bunny Search zum Ausprobieren: [link]"}),
+                "cost": 0.0}
     if tag.startswith("write"):
         idx = int(tag.split(":")[1])
         hook = f"Most creator databases are wrong about {idx} thing{'s' if idx else ''}."
@@ -279,7 +421,7 @@ def fake_complete(system, user, tag):
     if tag.startswith("pair"):
         return {"text": json.dumps({"winner": rnd.choice(["X", "Y"]), "why": "clearer hook and more specific"}), "cost": 0.0}
     if tag == "refine":
-        cur = re.search(r"CURRENT POST[^\n]*:\n(.*?)\n\nFOUNDER'S INSTRUCTION:\n(.*?)\n\nReturn", user, re.S)
+        cur = re.search(r"CURRENT POST[^\n]*:\n(.*?)\n\nNUMBERED LINES.*?FOUNDER'S INSTRUCTION:\n(.*?)\n\nReturn", user, re.S)
         text, instr = (cur.group(1), cur.group(2)) if cur else ("x" * 150, "")
         kept = " [kept-edits]" if re.search(r"FOUNDER EDITS[^\n]*\n(?!\(none)", user) else ""
         lesson = "Never open with a dramatic rhetorical hook." if "fake" in instr.lower() else ""
@@ -328,8 +470,8 @@ class Ctx:
         self.check()
         with self.lock:
             with db() as con:
-                row = con.execute("SELECT calls, v2 FROM runs WHERE id=?", (self.run_id,)).fetchone()
-                cap = max_calls(row["v2"])
+                row = con.execute("SELECT calls, v2, engine FROM runs WHERE id=?", (self.run_id,)).fetchone()
+                cap = max_calls(row["v2"], row["engine"])
                 if row["calls"] >= cap:
                     raise RunAbort(f"call cap of {cap} reached")
                 con.execute("UPDATE runs SET calls=calls+1 WHERE id=?", (self.run_id,))
@@ -451,6 +593,10 @@ def pair_system(persona):
 
 # --------------------------------------------------------------------------- pipeline
 def execute_run(run_id):
+    with db() as con:
+        eng = con.execute("SELECT engine FROM runs WHERE id=?", (run_id,)).fetchone()
+    if eng is not None and eng["engine"] == "v3":
+        return execute_v3(run_id)
     ctx = Ctx(run_id)
     try:
         with db() as con:
@@ -689,6 +835,297 @@ def execute_run(run_id):
             pass
 
 
+def v3_meta(run):
+    try:
+        return json.loads(run["meta"] or "{}")
+    except (ValueError, TypeError):
+        return {}
+
+
+def _save_meta(run_id, meta):
+    with db() as con:
+        con.execute("UPDATE runs SET meta=? WHERE id=?", (json.dumps(meta), run_id))
+
+
+def _today_line(meta):
+    from datetime import date
+    try:
+        d = date.fromisoformat(meta.get("today") or "")
+    except ValueError:
+        from datetime import datetime, timezone
+        d = datetime.now(timezone.utc).date()
+    return f"{d.isoformat()} ({d.strftime('%A, %d %B %Y')})"
+
+
+def v3_context(meta, brief, menus=False):
+    std = [k for k in (meta.get("standards") or []) if k in STANDARDS]
+    parts = [f"TODAY: {_today_line(meta)}. This is the real current date. Never present a date before it as a future plan or "
+             "target; a past target in the brief was missed.",
+             "=== FOUNDER BRIEF (facts, voice, audience) ===\n" + brief]
+    if menus:
+        parts.append("=== AUDIENCES (keys) ===\n" + "\n".join(f"- {k}: {v[0]}. {v[1]}" for k, v in AUDIENCES.items()))
+        parts.append("=== POST TYPES (keys) ===\n" + "\n".join(f"- {k}: {v[0]}. {v[1]}" for k, v in POST_TYPES.items()))
+    else:
+        a, t = AUDIENCES.get(meta.get("audience")), POST_TYPES.get(meta.get("post_type"))
+        if a:
+            parts.append(f"=== WHO THIS POST IS FOR (one reader; write for them) ===\n{a[0]}: {a[1]}")
+        if t:
+            parts.append(f"=== POST TYPE ===\n{t[0]}: {t[1]}")
+    if std:
+        parts.append("=== STANDARDS THIS POST MUST MEET ===\n" + "\n".join(f"- {k}: {STANDARDS[k][1]}" for k in std))
+    return "\n\n".join(parts)
+
+
+def v3_facts(run, meta):
+    out = f"RAW IDEA (the subject of the post):\n{run['idea_text']}\n\n" + notes_section(run["notes"])
+    ans = meta.get("answers") or []
+    got = [a for a in ans if a.get("answer")]
+    skipped = [a for a in ans if not a.get("answer")]
+    if got:
+        out += "FOUNDER'S ANSWERS (true facts; use them):\n" + "\n".join(f"Q: {a['ask']}\nA: {a['answer']}" for a in got) + "\n\n"
+    if skipped:
+        out += ("NOT ANSWERED (do NOT invent these; write around them honestly):\n"
+                + "\n".join("- " + a["ask"] for a in skipped) + "\n\n")
+    pl = meta.get("plan") or {}
+    if pl:
+        out += (f"PLAN\nCore line: {pl.get('core_line', '')}\nMust include: {'; '.join(pl.get('must_include') or []) or '-'}\n"
+                f"Closing question idea: {pl.get('ending_question', '')}\n\n")
+    return out
+
+
+def clean_plan(pl, meta):
+    def s(v, n):
+        return str(v or "").strip()[:n]
+    aud = meta.get("audience") if meta.get("audience") in AUDIENCES else s(pl.get("audience"), 20)
+    typ = meta.get("post_type") if meta.get("post_type") in POST_TYPES else s(pl.get("post_type"), 20)
+    core = s(pl.get("core_line"), 400)
+    hooks = [s(h, 300) for h in (pl.get("hooks") or []) if s(h, 300)][:3]
+    while len(hooks) < 3:
+        hooks.append(core or "Lead with the strongest line of the idea.")
+    qs = []
+    for q in (pl.get("questions") or [])[:3]:
+        ask = s(q.get("ask") if isinstance(q, dict) else q, 220)
+        if ask:
+            qs.append({"ask": ask, "why": s(q.get("why") if isinstance(q, dict) else "", 120)})
+    return {"audience": aud if aud in AUDIENCES else "dtc", "post_type": typ if typ in POST_TYPES else "build",
+            "reasoning": s(pl.get("reasoning"), 900), "core_line": core, "hooks": hooks,
+            "must_include": [s(x, 200) for x in (pl.get("must_include") or [])[:6] if s(x, 200)],
+            "ending_question": s(pl.get("ending_question"), 300), "questions": qs}
+
+
+def v3_check(ctx, key, meta, brief, texts, std, lang="English", facts=""):
+    """One call checks up to 3 posts. Returns [{'checks':{k:{pass,why}},'score':int|None,'reaction':str}] (empty dicts on failure).
+    facts = the run's source facts (idea, notes, answers, skipped questions) so invented details can be caught."""
+    letters = "ABC"
+    system = V3_CHECK + "\n\n" + v3_context(meta, brief)
+    listing = "\n\n".join(f"[{letters[i]}]\n{t}" for i, t in enumerate(texts))
+    user = (f"=== SOURCE FACTS (the only facts the founder gave) ===\n{facts}\n" if facts else "") + f"Posts ({lang}):\n\n{listing}"
+    data = parse_json(ctx.llm_step(key, system, user, max_tokens=2400, temperature=0.2, tag=key, model=V3_MODEL))
+    if not isinstance(data, dict) or not isinstance(data.get("posts"), dict):
+        data = parse_json(ctx.llm_step(key + ":retry", system, "Return ONLY valid JSON.\n\n" + user, max_tokens=2400,
+                                       temperature=0.1, tag=key, model=V3_MODEL))
+    posts = (data or {}).get("posts") if isinstance(data, dict) else None
+    out = []
+    for i in range(len(texts)):
+        e = (posts or {}).get(letters[i]) if isinstance(posts, dict) else None
+        if not isinstance(e, dict):
+            out.append({})
+            continue
+        checks = {}
+        for k in std:
+            c = (e.get("checks") or {}).get(k)
+            if isinstance(c, dict):
+                checks[k] = {"pass": bool(c.get("pass")), "why": str(c.get("why") or "")[:200]}
+        try:
+            score = max(1, min(10, int(round(float(e.get("score"))))))
+        except (TypeError, ValueError):
+            score = None
+        out.append({"checks": checks, "score": score, "reaction": str(e.get("reaction") or "")[:240]})
+    return out
+
+
+def v3_passes(c, std):
+    return {k for k in std if (c.get("checks") or {}).get(k, {}).get("pass")}
+
+
+def v3_not_worse(new, old, std):
+    """A fix may only replace the original if it passes at least as many standards and loses none it passed (truth included)."""
+    return v3_passes(old, std) <= v3_passes(new, std)
+
+
+def v3_failed(c, std):
+    return any(not (c.get("checks") or {}).get(k, {"pass": True})["pass"] for k in std)
+
+
+def v3_fix(ctx, key, meta, brief, facts, text, c, std, lang):
+    failed = [k for k in std if not (c.get("checks") or {}).get(k, {"pass": True})["pass"]]
+    if not failed:
+        return None
+    why = "\n".join(f"- {k} ({STANDARDS[k][0]}): {c['checks'][k]['why']}" for k in failed)
+    system = V3_FIX + "\n\n" + v3_context(meta, brief)
+    user = facts + f"FAILED STANDARDS:\n{why}\n\nLANGUAGE: {lang}.\n\nPOST:\n{text}"
+    t = clean_post(ctx.llm_step(key, system, user, max_tokens=1800, temperature=0.4, tag=key, min_chars=200, model=V3_MODEL))
+    return t if len(t) >= 200 else None
+
+
+def _v3_scores(c):
+    return json.dumps({"checks": c.get("checks") or {}, "reaction": c.get("reaction") or "", "score10": c.get("score")})
+
+
+def execute_v3(run_id):
+    ctx = Ctx(run_id)
+    try:
+        with db() as con:
+            run = con.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        if run is None:
+            return
+        meta, brief = v3_meta(run), run["brief"]
+        std = [k for k in (meta.get("standards") or []) if k in STANDARDS]
+        with db() as con:
+            con.execute("UPDATE runs SET status='running', error=NULL WHERE id=?", (run_id,))
+
+        # 1. PLAN (+ questions) ------------------------------------------------------------
+        if not meta.get("plan"):
+            ctx.progress("Planning", 5)
+            psys = V3_PLAN + "\n\n" + v3_context(meta, brief, menus=True)
+            pu = (v3_facts(run, meta) + f"AUDIENCE SET BY THE FOUNDER: {meta.get('audience') or 'auto'}\n"
+                  f"POST TYPE SET BY THE FOUNDER: {meta.get('post_type') or 'auto'}\n\nMake the plan now.")
+            plan = parse_json(ctx.llm_step("v3:plan", psys, pu, max_tokens=2000, temperature=0.4, tag="v3:plan", model=V3_MODEL))
+            if not isinstance(plan, dict):
+                plan = parse_json(ctx.llm_step("v3:plan:retry", psys, pu + "\n\nReturn ONLY valid JSON.", max_tokens=2000,
+                                               temperature=0.2, tag="v3:plan", model=V3_MODEL))
+            if not isinstance(plan, dict):
+                raise RunAbort("the planner returned no usable plan; use Retry")
+            plan = clean_plan(plan, meta)
+            meta.update(plan=plan, audience=plan["audience"], post_type=plan["post_type"])
+            _save_meta(run_id, meta)
+        plan = meta["plan"]
+        if plan.get("questions") and meta.get("answers") is None:
+            with db() as con:
+                con.execute("UPDATE runs SET status='needs_input', step='Waiting for your answers', progress=15 WHERE id=?", (run_id,))
+            return
+
+        # 2. WRITE 3 English drafts, one per hook ---------------------------------------------
+        ctx.progress("Writing 3 drafts", 25)
+        wsys = V3_WRITER + "\n\n" + v3_context(meta, brief)
+        facts = v3_facts(run, meta)
+
+        def write(i):
+            u = facts + f"OPENING: build the first two lines from this hook (tighten it if needed):\n{plan['hooks'][i]}\n\nLANGUAGE: English.\n\nWrite the post now."
+            for key, temp in ((f"v3:write:{i}", 0.6), (f"v3:write:{i}:retry", 0.4)):
+                t = clean_post(ctx.llm_step(key, wsys, u, max_tokens=1600, temperature=temp, tag=f"v3:write:{i}", min_chars=200, model=V3_MODEL))
+                if len(t) >= 200:
+                    return i, t
+            raise RunAbort(f"draft {i + 1} came back empty; use Retry")
+
+        with ThreadPoolExecutor(PARALLEL) as ex:
+            written = list(ex.map(write, range(3)))
+        with db() as con:
+            if con.execute("SELECT COUNT(*) c FROM drafts WHERE run_id=? AND lang='en'", (run_id,)).fetchone()["c"] == 0:
+                for i, t in written:
+                    con.execute("INSERT INTO drafts(run_id,idea_id,user_id,angle,text,flags,dropped,variant_set,lang) VALUES(?,?,?,?,?,?,0,'v3','en')",
+                                (run_id, run["idea_id"], run["user_id"], f"hook{i + 1}", t, json.dumps(analyze(t)[0])))
+            en = [dict(r) for r in con.execute("SELECT * FROM drafts WHERE run_id=? AND lang='en' ORDER BY id", (run_id,))]
+
+        # 3. CHECK against the standards, reading as the audience ------------------------------
+        ctx.progress("Checking against your standards", 50)
+        checked = v3_check(ctx, "v3:check", meta, brief, [d["text"] for d in en], std, facts=facts)
+
+        # 4. FIX each failing draft once, then re-check the fixed ones -----------------------
+        fails = [j for j, c in enumerate(checked) if v3_failed(c, std)]
+        if fails:
+            ctx.progress("Fixing what failed", 62)
+            with ThreadPoolExecutor(PARALLEL) as ex:
+                fixed = {j: t for j, t in ex.map(lambda j: (j, v3_fix(ctx, f"v3:fix:{j}", meta, brief, facts, en[j]["text"],
+                                                                        checked[j], std, "English")), fails) if t}
+            if fixed:
+                order = sorted(fixed)
+                for j, c in zip(order, v3_check(ctx, "v3:recheck", meta, brief, [fixed[j] for j in order], std, facts=facts)):
+                    if c and v3_not_worse(c, checked[j], std):
+                        checked[j] = c
+                    else:
+                        fixed.pop(j)  # the fix made it worse (e.g. invented a detail): keep the original
+                with db() as con:
+                    for j, t in fixed.items():
+                        con.execute("UPDATE drafts SET polished_text=? WHERE id=?", (t, en[j]["id"]))
+                        en[j]["polished_text"] = t
+
+        # 5. PICK: most standards passed, then reader score ----------------------------------
+        def rank_key(j):
+            c = checked[j]
+            return (sum(1 for k in std if (c.get("checks") or {}).get(k, {}).get("pass")), c.get("score") or 0)
+        order = sorted(range(len(en)), key=rank_key, reverse=True)
+        best = en[order[0]]
+        best_text = best.get("polished_text") or best["text"]
+        with db() as con:
+            for rank, j in enumerate(order, 1):
+                c = checked[j]
+                con.execute("UPDATE drafts SET rank=?, score=?, scores=?, selected=? WHERE id=?",
+                            (rank, (c.get("score") or 0) * 10, _v3_scores(c), 1 if rank == 1 else 0, en[j]["id"]))
+
+        # 6. GERMAN, written natively from the same plan --------------------------------------
+        ctx.progress("Writing the German version", 75)
+        du = (facts + f"ENGLISH VERSION (same plan; use it for content, do NOT translate it line by line):\n{best_text}\n\n"
+              "LANGUAGE: German. Write natively for German-speaking LinkedIn, informal 'du'. Same core line, facts and closing-question "
+              "idea; render the Bunny Search one-liner in natural German.\n\nWrite the post now.")
+        de_text = None
+        for key, temp in (("v3:de", 0.5), ("v3:de:retry", 0.35)):
+            t = clean_post(ctx.llm_step(key, wsys, du, max_tokens=1800, temperature=temp, tag="v3:de", min_chars=200, model=V3_MODEL))
+            if len(t) >= 200:
+                de_text = t
+                break
+        de_id = None
+        if de_text:
+            with db() as con:
+                row = con.execute("SELECT id FROM drafts WHERE run_id=? AND lang='de'", (run_id,)).fetchone()
+                de_id = row["id"] if row else con.execute(
+                    "INSERT INTO drafts(run_id,idea_id,user_id,angle,text,flags,dropped,variant_set,lang) VALUES(?,?,?,?,?,'[]',0,'v3','de')",
+                    (run_id, run["idea_id"], run["user_id"], "de", de_text)).lastrowid
+            dc = v3_check(ctx, "v3:check:de", meta, brief, [de_text], std, lang="German", facts=facts)[0]
+            de_fixed = None
+            if v3_failed(dc, std):
+                de_fixed = v3_fix(ctx, "v3:fix:de", meta, brief, facts, de_text, dc, std, "German (informal du)")
+                if de_fixed:
+                    dc2 = v3_check(ctx, "v3:check:de:fixed", meta, brief, [de_fixed], std, lang="German", facts=facts)[0]
+                    if dc2 and v3_not_worse(dc2, dc, std):
+                        dc = dc2
+                    else:
+                        de_fixed = None
+            with db() as con:
+                con.execute("UPDATE drafts SET rank=1, score=?, scores=?, selected=1, polished_text=? WHERE id=?",
+                            ((dc.get("score") or 0) * 10, _v3_scores(dc), de_fixed, de_id))
+
+        # 7. FIRST COMMENT (link lives here, not in the post) ---------------------------------
+        ctx.progress("Writing the first comment", 92)
+        try:
+            cm = parse_json(ctx.llm_step("v3:comment", V3_COMMENT + "\n\n=== FOUNDER BRIEF ===\n" + brief, "POST (English):\n" + best_text,
+                                         max_tokens=600, temperature=0.4, tag="v3:comment", model=V3_MODEL)) or {}
+        except RuntimeError:
+            cm = {}
+        meta["first_comment"] = {"en": str(cm.get("en") or "")[:600], "de": str(cm.get("de") or "")[:600]}
+        _save_meta(run_id, meta)
+        with db() as con:
+            summary = {"winner_id": best["id"], "winner_ids": [best["id"]] + ([de_id] if de_id else []), "engine": "v3",
+                       "disclaimer": V3_DISCLAIMER}
+            con.execute("UPDATE runs SET status='done', step='Done', progress=100, summary=?, finished_at=? WHERE id=?",
+                        (json.dumps(summary), now(), run_id))
+    except CapReached:
+        _fail(run_id, "The daily LLM gateway cap was reached. Try again tomorrow (completed steps are kept).")
+    except RunAbort as e:
+        if str(e) == "cancelled":
+            return
+        _fail(run_id, str(e))
+    except Exception as e:  # noqa: BLE001
+        log.error("v3 run %s failed: %s\n%s", run_id, e, traceback.format_exc())
+        _fail(run_id, f"{type(e).__name__}: {str(e)[:200]} (use Retry to resume; completed steps are kept)")
+    finally:
+        _ACTIVE.pop(run_id, None)
+        try:
+            _RUN_LOCK.release()
+        except RuntimeError:
+            pass
+
+
 def _fail(run_id, msg):
     with db() as con:
         con.execute("UPDATE runs SET status='failed', error=?, finished_at=? WHERE id=?", (msg, now(), run_id))
@@ -726,6 +1163,30 @@ class ProfileIn(BaseModel):
 class IdeaIn(BaseModel):
     text: str
     notes: Optional[str] = None  # None = leave unchanged on update
+    audience: Optional[str] = None  # V3: key of AUDIENCES or 'auto'; None = leave unchanged
+    post_type: Optional[str] = None  # V3: key of POST_TYPES or 'auto'
+    standards: Optional[List[str]] = None  # V3: enabled STANDARDS keys; None = leave unchanged
+
+
+def clean_choice(v, table):
+    v = (v or "").strip()
+    if v in ("", "auto"):
+        return ""
+    if v not in table:
+        raise HTTPException(400, f"unknown value '{v}'")
+    return v
+
+
+def clean_standards(v):
+    return json.dumps([k for k in STANDARDS if k in set(v or [])])
+
+
+def idea_v3(i):
+    try:
+        std = json.loads(i["standards"]) if i["standards"] is not None else list(STANDARDS)
+    except ValueError:
+        std = list(STANDARDS)
+    return {"audience": i["audience"] or "auto", "post_type": i["post_type"] or "auto", "standards": std}
 
 
 MAX_NOTES = 1500
@@ -756,6 +1217,11 @@ class PostedIn(BaseModel):
 
 class RunIn(BaseModel):
     v2: bool = False
+    engine: Optional[str] = None  # 'v3' | 'v2' | 'v1' (None: v2 flag decides between v1 and v2)
+
+
+class AnswersIn(BaseModel):
+    answers: List[str] = []
 
 
 def uid(user):
@@ -774,7 +1240,8 @@ def serialize_draft(r):
     return {"id": r["id"], "angle": r["angle"], "text": r["text"], "polished_text": r["polished_text"],
             "edited_text": r["edited_text"], "flags": json.loads(r["flags"]), "dropped": bool(r["dropped"]),
             "score": r["score"], "rank": r["rank"], "selected": bool(r["selected"]), "pairwise_wins": r["pairwise_wins"],
-            "variant_set": (r["variant_set"] if "variant_set" in r.keys() else "v1"),
+            "variant_set": (r["variant_set"] if "variant_set" in r.keys() else "v1"), "lang": r["lang"],
+            "checks": sc.get("checks"), "reaction": sc.get("reaction"), "score10": sc.get("score10"),
             "means": sc.get("means"), "reactions": sc.get("reactions", []), "posted_at": r["posted_at"]}
 
 
@@ -785,8 +1252,9 @@ def serialize_run(con, run_id):
     drafts = [dict(serialize_draft(d), revisions=counts.get(d["id"], 0)) for d in con.execute(
         "SELECT * FROM drafts WHERE run_id=? ORDER BY rank IS NULL, rank, id", (run_id,))]
     return {"id": r["id"], "idea_id": r["idea_id"], "status": r["status"], "step": r["step"], "progress": r["progress"],
-            "calls": r["calls"], "max_calls": max_calls(r["v2"]), "cost_usd": round(r["cost_usd"], 4), "error": r["error"],
-            "v2": bool(r["v2"]), "notes": r["notes"], "summary": json.loads(r["summary"]) if r["summary"] else None, "created_at": r["created_at"],
+            "calls": r["calls"], "max_calls": max_calls(r["v2"], r["engine"]), "cost_usd": round(r["cost_usd"], 4), "error": r["error"],
+            "v2": bool(r["v2"]), "engine": r["engine"] or ("v2" if r["v2"] else "v1"), "meta": v3_meta(r) if r["engine"] == "v3" else None,
+            "notes": r["notes"], "summary": json.loads(r["summary"]) if r["summary"] else None, "created_at": r["created_at"],
             "finished_at": r["finished_at"], "drafts": drafts, "disclaimer": DISCLAIMER}
 
 
@@ -816,7 +1284,10 @@ def status(user=Depends(get_verified_user)):
             gw = {"ok": False, "error": type(e).__name__}
     else:
         gw = {"ok": True, "fake": True, "calls_today": 0, "cap_calls": 0}
-    return {"gateway": gw, "busy": _RUN_LOCK.locked(), "fake": FAKE, "max_calls_per_run": MAX_CALLS_PER_RUN}
+    return {"gateway": gw, "busy": _RUN_LOCK.locked(), "fake": FAKE, "max_calls_per_run": MAX_CALLS_PER_RUN,
+            "v3": {"model": V3_MODEL, "audiences": {k: v[0] for k, v in AUDIENCES.items()},
+                   "post_types": {k: v[0] for k, v in POST_TYPES.items()},
+                   "standards": {k: {"label": v[0], "desc": v[1]} for k, v in STANDARDS.items()}}}
 
 
 @router.get("/profile")
@@ -853,12 +1324,12 @@ def list_ideas(user=Depends(get_verified_user)):
         rows = con.execute("SELECT * FROM ideas WHERE user_id=? ORDER BY updated_at DESC LIMIT 200", (uid(user),)).fetchall()
         out = []
         for i in rows:
-            run = con.execute("SELECT id,status,step,progress,v2 FROM runs WHERE idea_id=? ORDER BY id DESC LIMIT 1", (i["id"],)).fetchone()
+            run = con.execute("SELECT id,status,step,progress,v2,engine FROM runs WHERE idea_id=? ORDER BY id DESC LIMIT 1", (i["id"],)).fetchone()
             if run and run["status"] == "running":
                 ensure_worker(run["id"])
-            posted = con.execute("SELECT 1 FROM drafts WHERE idea_id=? AND posted_at IS NOT NULL LIMIT 1", (i["id"],)).fetchone()
+            posted = con.execute("SELECT MAX(posted_at) p FROM drafts WHERE idea_id=? AND posted_at IS NOT NULL", (i["id"],)).fetchone()["p"]
             out.append({"id": i["id"], "text": i["text"], "notes": i["notes"], "created_at": i["created_at"], "updated_at": i["updated_at"],
-                        "run": dict(run) if run else None, "posted": bool(posted)})
+                        "run": dict(run) if run else None, "posted": bool(posted), "posted_at": posted, **idea_v3(i)})
         return {"ideas": out}
 
 
@@ -868,8 +1339,11 @@ def create_idea(body: IdeaIn, user=Depends(get_verified_user)):
     if not (10 <= len(text) <= 4000):
         raise HTTPException(400, "idea must be 10-4000 characters")
     notes = clean_notes(body.notes)
+    aud, typ = clean_choice(body.audience, AUDIENCES), clean_choice(body.post_type, POST_TYPES)
+    std = None if body.standards is None else clean_standards(body.standards)
     with db() as con:
-        cur = con.execute("INSERT INTO ideas(user_id,text,notes,created_at,updated_at) VALUES(?,?,?,?,?)", (uid(user), text, notes, now(), now()))
+        cur = con.execute("INSERT INTO ideas(user_id,text,notes,audience,post_type,standards,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                          (uid(user), text, notes, aud, typ, std, now(), now()))
         return {"id": cur.lastrowid}
 
 
@@ -884,6 +1358,12 @@ def update_idea(idea_id: int, body: IdeaIn, user=Depends(get_verified_user)):
         con.execute("UPDATE ideas SET text=?, updated_at=? WHERE id=?", (text, now(), idea_id))
         if notes is not None:
             con.execute("UPDATE ideas SET notes=? WHERE id=?", (notes, idea_id))
+        if body.audience is not None:
+            con.execute("UPDATE ideas SET audience=? WHERE id=?", (clean_choice(body.audience, AUDIENCES), idea_id))
+        if body.post_type is not None:
+            con.execute("UPDATE ideas SET post_type=? WHERE id=?", (clean_choice(body.post_type, POST_TYPES), idea_id))
+        if body.standards is not None:
+            con.execute("UPDATE ideas SET standards=? WHERE id=?", (clean_standards(body.standards), idea_id))
     return {"ok": True}
 
 
@@ -913,20 +1393,28 @@ def get_idea(idea_id: int, user=Depends(get_verified_user)):
         if runs:
             ensure_worker(runs[0])
             latest = serialize_run(con, runs[0])
-        return {"id": i["id"], "text": i["text"], "notes": i["notes"], "created_at": i["created_at"], "run_ids": runs, "latest_run": latest}
+        return {"id": i["id"], "text": i["text"], "notes": i["notes"], "created_at": i["created_at"], "run_ids": runs, "latest_run": latest,
+                **idea_v3(i)}
 
 
 @router.post("/ideas/{idea_id}/run")
 def run_idea(idea_id: int, body: RunIn = RunIn(), user=Depends(get_verified_user)):
-    v2 = bool(body.v2)
+    engine = body.engine if body.engine in ("v1", "v2", "v3") else ("v2" if body.v2 else "v1")
+    v2 = engine == "v2"
     with db() as con:
         i = own_idea(con, idea_id, uid(user))
         prof = get_profile_row(con, uid(user))
         if _RUN_LOCK.locked():
             raise HTTPException(409, "Another draft run is in progress; wait for it to finish.")
         brief = prof["brief"] + learnings_block(con, uid(user))
-        cur = con.execute("INSERT INTO runs(idea_id,user_id,status,step,brief,personas,idea_text,notes,v2,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                          (idea_id, uid(user), "running", "Starting", brief, json.dumps(prof["personas"]), i["text"], i["notes"], 1 if v2 else 0, now()))
+        meta = None
+        if engine == "v3":
+            from datetime import datetime, timezone
+            meta = json.dumps({"today": datetime.now(timezone.utc).date().isoformat(), **idea_v3(i)})
+        cur = con.execute("INSERT INTO runs(idea_id,user_id,status,step,brief,personas,idea_text,notes,v2,engine,meta,created_at) "
+                          "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (idea_id, uid(user), "running", "Starting", brief, json.dumps(prof["personas"]), i["text"], i["notes"],
+                           1 if v2 else 0, engine, meta, now()))
         run_id = cur.lastrowid
         con.execute("UPDATE ideas SET updated_at=? WHERE id=?", (now(), idea_id))
     if not start_worker(run_id):
@@ -959,11 +1447,33 @@ def retry_run(run_id: int, user=Depends(get_verified_user)):
     return {"ok": True}
 
 
+@router.post("/runs/{run_id}/answers")
+def answer_run(run_id: int, body: AnswersIn, user=Depends(get_verified_user)):
+    """V3: the founder answers (or skips, with '') the planner's questions; the run then continues."""
+    with db() as con:
+        r = own_run(con, run_id, uid(user))
+        if r["status"] != "needs_input":
+            raise HTTPException(400, "this run is not waiting for answers")
+        if _RUN_LOCK.locked():
+            raise HTTPException(409, "Another draft run is in progress; wait for it to finish.")
+        meta = v3_meta(r)
+        qs = (meta.get("plan") or {}).get("questions") or []
+        ans = [str(a or "").strip()[:800] for a in body.answers][:len(qs)]
+        ans += [""] * (len(qs) - len(ans))
+        meta["answers"] = [{"ask": q["ask"], "answer": a} for q, a in zip(qs, ans)]
+        con.execute("UPDATE runs SET meta=?, status='running', step='Writing 3 drafts', progress=20 WHERE id=?", (json.dumps(meta), run_id))
+    if not start_worker(run_id):
+        with db() as con:
+            con.execute("UPDATE runs SET status='needs_input', step='Waiting for your answers' WHERE id=?", (run_id,))
+        raise HTTPException(409, "Another draft run is in progress; wait for it to finish.")
+    return {"ok": True}
+
+
 @router.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: int, user=Depends(get_verified_user)):
     with db() as con:
         r = own_run(con, run_id, uid(user))
-        if r["status"] != "running":
+        if r["status"] not in ("running", "needs_input"):
             raise HTTPException(400, "run is not running")
         con.execute("UPDATE runs SET status='cancelled', step='Cancelled', finished_at=? WHERE id=?", (now(), run_id))
     return {"ok": True}
@@ -1006,6 +1516,8 @@ class ReviewIn(BaseModel):
     comments: Optional[int] = None
     reposts: Optional[int] = None
     profile_views: Optional[int] = None
+    dms: Optional[int] = None
+    signups: Optional[int] = None
     icp_note: Optional[str] = None
 
 
@@ -1081,15 +1593,19 @@ def calibration(con, user_id):
                         "Weak link between simulated score and real engagement so far; treat scores as a rough filter only.")}
 
 
-def _post_row(r, rv):
+REVIEW_FIELDS = ("impressions", "reactions", "comments", "reposts", "profile_views", "dms", "signups")
+
+
+def _post_row(r, rv, idea=None):
     return {"draft_id": r["id"], "idea_id": r["idea_id"], "angle": r["angle"], "sim_score": r["score"], "posted_at": r["posted_at"],
-            "text": r["edited_text"] or r["polished_text"] or r["text"],
-            "review": ({k: rv[k] for k in ("impressions", "reactions", "comments", "reposts", "profile_views", "icp_note")} if rv else None)}
+            "text": r["edited_text"] or r["polished_text"] or r["text"], "lang": r["lang"], "variant_set": r["variant_set"],
+            "audience": (idea["audience"] if idea else "") or "", "post_type": (idea["post_type"] if idea else "") or "",
+            "review": ({k: rv.get(k) for k in REVIEW_FIELDS + ("icp_note",)} if rv else None)}
 
 
 @router.put("/drafts/{draft_id}/review")
 def put_review(draft_id: int, body: ReviewIn, user=Depends(get_verified_user)):
-    for k in ("impressions", "reactions", "comments", "reposts", "profile_views"):
+    for k in REVIEW_FIELDS:
         v = getattr(body, k)
         if v is not None and not (0 <= v <= 100_000_000):
             raise HTTPException(400, f"{k} must be between 0 and 100,000,000")
@@ -1098,12 +1614,12 @@ def put_review(draft_id: int, body: ReviewIn, user=Depends(get_verified_user)):
         d = own_draft(con, draft_id, uid(user))
         if not d["posted_at"]:
             raise HTTPException(400, "mark the draft as posted before adding results")
-        con.execute("INSERT INTO reviews(user_id,draft_id,impressions,reactions,comments,reposts,profile_views,icp_note,week_start,created_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(draft_id) DO UPDATE SET impressions=excluded.impressions, "
+        con.execute("INSERT INTO reviews(user_id,draft_id,impressions,reactions,comments,reposts,profile_views,dms,signups,icp_note,week_start,created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(draft_id) DO UPDATE SET impressions=excluded.impressions, "
                     "reactions=excluded.reactions, comments=excluded.comments, reposts=excluded.reposts, "
-                    "profile_views=excluded.profile_views, icp_note=excluded.icp_note",
-                    (uid(user), draft_id, body.impressions, body.reactions, body.comments, body.reposts, body.profile_views, note,
-                     _week_start(d["posted_at"]), now()))
+                    "profile_views=excluded.profile_views, dms=excluded.dms, signups=excluded.signups, icp_note=excluded.icp_note",
+                    (uid(user), draft_id, body.impressions, body.reactions, body.comments, body.reposts, body.profile_views,
+                     body.dms, body.signups, note, _week_start(d["posted_at"]), now()))
     return {"ok": True}
 
 
@@ -1116,7 +1632,8 @@ def get_reviews(week: Optional[str] = None, user=Depends(get_verified_user)):
         posts = []
         for d in drafts:
             rv = con.execute("SELECT * FROM reviews WHERE draft_id=?", (d["id"],)).fetchone()
-            posts.append(_post_row(d, dict(rv) if rv else None))
+            idea = con.execute("SELECT audience, post_type FROM ideas WHERE id=?", (d["idea_id"],)).fetchone()
+            posts.append(_post_row(d, dict(rv) if rv else None, idea))
         ins = con.execute("SELECT result, created_at FROM insights WHERE user_id=? AND week_start=? ORDER BY id DESC LIMIT 1",
                           (uid(user), ws)).fetchone()
         learn = [dict(r) for r in con.execute(
@@ -1129,8 +1646,9 @@ def get_reviews(week: Optional[str] = None, user=Depends(get_verified_user)):
 REVIEW_SYSTEM = (
     "You are a sharp, honest LinkedIn performance analyst for ONE founder. You get this week's posts with the simulated score "
     "(a heuristic) and the real numbers the founder entered. Compare posts against each other; do not invent data; with 1-3 posts say "
-    "that the sample is tiny and keep conclusions modest. Pay special attention to the founder's own note about WHO engaged: "
-    "engagement from the target audience (small DTC/e-commerce brand owners) matters more than raw reach.\n"
+    "that the sample is tiny and keep conclusions modest. Each post names the audience it was written for and its post type: "
+    "judge whether THAT audience engaged. DMs, signups and profile views matter far more than reactions; the founder's note "
+    "about WHO engaged matters more than raw reach. Compare audiences and post types when there is more than one.\n"
     'Return ONLY JSON: {"summary":"2-3 sentences","worked":["max 3 items"],"didnt":["max 3 items"],'
     '"icp_signal":"one sentence on whether the right people engaged",'
     '"notes":["0-4 short imperative guidelines for FUTURE posts, max 22 words each, only if the data supports them"]}')
@@ -1145,16 +1663,19 @@ def analyze_week(body: AnalyzeIn, user=Depends(get_verified_user)):
         items = []
         for d in drafts:
             rv = con.execute("SELECT * FROM reviews WHERE draft_id=?", (d["id"],)).fetchone()
-            if rv and any(rv[k] is not None for k in ("impressions", "reactions", "comments", "reposts")):
-                items.append((d, dict(rv)))
+            if rv and any(rv[k] is not None for k in REVIEW_FIELDS):
+                idea = con.execute("SELECT audience, post_type FROM ideas WHERE id=?", (d["idea_id"],)).fetchone()
+                items.append((d, dict(rv), idea))
     if not items:
         raise HTTPException(400, "Add results for at least one posted draft this week first.")
     lines = []
-    for n, (d, rv) in enumerate(items, 1):
+    for n, (d, rv, idea) in enumerate(items, 1):
         eng = engagement(rv)
-        lines.append(f"POST {n} | angle: {d['angle']} | simulated score: {d['score']}\n"
+        aud = AUDIENCES.get((idea["audience"] if idea else "") or "", ("not set",))[0]
+        typ = POST_TYPES.get((idea["post_type"] if idea else "") or "", ("not set",))[0]
+        lines.append(f"POST {n} | audience: {aud} | post type: {typ} | language: {d['lang']} | angle: {d['angle']} | simulated score: {d['score']}\n"
                      f"numbers: impressions={rv['impressions']} reactions={rv['reactions']} comments={rv['comments']} "
-                     f"reposts={rv['reposts']} profile_views={rv['profile_views']} "
+                     f"reposts={rv['reposts']} profile_views={rv['profile_views']} dms={rv.get('dms')} signups={rv.get('signups')} "
                      f"engagement_per_100_impressions={None if eng is None else round(eng, 2)}\n"
                      f"founder's note on who engaged: {rv['icp_note'] or '(none)'}\n"
                      f"text:\n{(d['edited_text'] or d['polished_text'] or d['text'])[:1200]}")
@@ -1266,7 +1787,8 @@ REFINE_SYSTEM = (
     "3. Keep every change the founder made by hand (listed under FOUNDER EDITS) exactly as they wrote it, unless the instruction says to change it.\n"
     "4. Fix what makes drafts feel fake: hype, dramatic rhetorical hooks, tidy 'insight' lines, clichés, over-polished phrasing, "
     "lists of three adjectives. Prefer plain first-person words, specific details from the raw idea, short sentences, a little roughness.\n"
-    "5. Keep roughly the same length unless told otherwise. No hashtags or links unless the post already has them. English.\n"
+    "5. Keep roughly the same length unless told otherwise. No hashtags or links unless the post already has them. Keep the post's "
+    "language (English stays English; German stays German with informal du).\n"
     "6. The founder may point at lines as L1, L2, ... (see NUMBERED LINES; blank lines are not numbered). Change exactly the lines "
     "they name the way they ask, and leave the other lines as they are unless the instruction is about the whole post. "
     "Never put line numbers in your output.\n"
@@ -1374,7 +1896,7 @@ def refine_draft(draft_id: int, body: RefineIn, user=Depends(get_verified_user))
         n = con.execute("SELECT COUNT(*) c FROM revisions WHERE draft_id=?", (draft_id,)).fetchone()["c"]
         if n >= MAX_REVISIONS_PER_DRAFT:
             raise HTTPException(400, "this draft has reached its revision limit; start a new run instead")
-        run = con.execute("SELECT idea_text, notes FROM runs WHERE id=?", (d["run_id"],)).fetchone()
+        run = con.execute("SELECT idea_text, notes, engine FROM runs WHERE id=?", (d["run_id"],)).fetchone()
         prof = get_profile_row(con, uid(user))
         context = (prof["brief"] + learnings_block(con, uid(user)))[:3600]
         idea_text = run["idea_text"] if run else ""
@@ -1391,7 +1913,8 @@ def refine_draft(draft_id: int, body: RefineIn, user=Depends(get_verified_user))
               f"NUMBERED LINES (same post; how the founder refers to lines):\n{numbered_lines(text)}\n\n"
               f"FOUNDER'S INSTRUCTION:\n{instruction}\n\nReturn the JSON now.")
     try:
-        res = gw_complete(REFINE_SYSTEM, prompt, max_tokens=1800, temperature=0.5, tag="refine")
+        res = gw_complete(REFINE_SYSTEM, prompt, max_tokens=1800, temperature=0.5, tag="refine",
+                          model=V3_MODEL if run and run["engine"] == "v3" else None)
     except CapReached:
         raise HTTPException(429, "The daily LLM gateway cap was reached. Try again tomorrow.")
     except RuntimeError as e:

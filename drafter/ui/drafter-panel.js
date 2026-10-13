@@ -3,9 +3,10 @@
  * Registers itself via window.__cvRegisterPanel('drafter', ...). No build step; plain DOM; all user
  * text goes in through textContent/value only. Backend: /api/v1/linkedin-drafter (linkedin_drafter.py).
  *
- * Flow: dump a raw idea -> Draft it -> 6 variants are written, checked, scored by simulated audience
- * personas, matched head to head -> best draft is returned (editable, copy-paste; nothing is posted for you).
- * The score is labelled "simulated": a heuristic, not a reach forecast.
+ * Flow (V3, default): dump a raw idea -> Draft it -> Sonnet plans (audience, post type, core line) and may ask up to 3
+ * questions -> 3 English drafts checked against the founder's standards -> failures fixed once -> best one + a native
+ * German (du) version + a first comment for the link. V2 (12-variant tournament) stays as a secondary button; the V1
+ * button is gone but old V1 runs still render. Nothing is posted for you.
  */
 (function () {
 	'use strict';
@@ -14,7 +15,19 @@
 
 	var API = '/api/v1/linkedin-drafter';
 	var STEPS = ['Writing 6 variants', 'Checking drafts', 'Simulating audience reactions', 'Final matchups', 'Polishing the winner'];
-	var ANGLE_LABELS = { contrarian: 'Contrarian take', lesson: 'Personal lesson', example: 'Concrete example', howto: 'How-to', buildinpublic: 'Build in public', question: 'Question-led' };
+	var ANGLE_LABELS = { contrarian: 'Contrarian take', lesson: 'Personal lesson', example: 'Concrete example', howto: 'How-to', buildinpublic: 'Build in public', question: 'Question-led',
+		hook1: 'Hook 1', hook2: 'Hook 2', hook3: 'Hook 3', de: 'Deutsch' };
+	/* V3: same keys as AUDIENCES / POST_TYPES / STANDARDS in linkedin_drafter_router.py */
+	var AUDIENCES = [['auto', 'Let V3 suggest'], ['dtc', 'DTC brands'], ['agency', 'Agencies'], ['sme', 'Berlin SMEs'], ['founders', 'Founders']];
+	var POST_TYPES = [['auto', 'Let V3 suggest'], ['build', 'Build in public'], ['insight', 'Buyer insight'], ['engineer', 'Engineer credibility']];
+	var STANDARDS = [
+		['hook', 'Hook = best line', 'The strongest line sits in the first two lines, before "see more".'],
+		['brand', 'Says what Bunny Search is', 'The one-liner appears once, aimed at the chosen audience, never ad-like.'],
+		['ending', 'Easy closing question', 'Ends with a question the audience can answer in one line.'],
+		['truth', 'True, current, specific', 'Dates fit today, at least one real quote or number, nothing invented or vague.']
+	];
+	var STEPS_V3 = ['Planning', 'Waiting for your answers', 'Writing 3 drafts', 'Checking against your standards', 'Fixing what failed', 'Writing the German version', 'Writing the first comment'];
+	function label(list, key) { for (var i = 0; i < list.length; i++) if (list[i][0] === key) return list[i][1]; return key || ''; }
 
 	var H = null; /* host API from crons-tab.js */
 	var root = null;
@@ -150,7 +163,26 @@
 		'.dr-ptitle{font-size:.8125rem;margin:1rem 0 .25rem;color:var(--cv-name)}' +
 		'.dr-persona{display:flex;gap:.375rem;align-items:flex-start;margin:.375rem 0}' +
 		'.dr-persona .dr-input{flex:1}' +
-		'.dr-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin:.5rem 0}' +
+		'.dr-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin:.5rem 0}' +
+		'.dr-set{display:flex;align-items:center;gap:.375rem .75rem;flex-wrap:wrap;margin:.5rem 0 0 .25rem;font-size:.75rem;color:var(--cv-meta)}' +
+		'.dr-set label{display:inline-flex;align-items:center;gap:.375rem}' +
+		'.dr-set select{font:inherit;font-size:.75rem;color:var(--cv-name);background:var(--dr-field);border:0;border-radius:9999px;padding:.25rem .625rem;cursor:pointer}' +
+		'.dr-set select:focus-visible{outline:2px solid var(--cv-faint)}' +
+		'.dr-std{position:relative}' +
+		'.dr-std>summary{cursor:pointer;list-style:none;color:var(--cv-name);background:var(--dr-field);border-radius:9999px;padding:.25rem .625rem}' +
+		'.dr-std>summary::-webkit-details-marker{display:none}' +
+		'.dr-std[open]>summary{outline:1px solid var(--cv-faint)}' +
+		'.dr-std-list{margin:.375rem 0 0;padding:.5rem .625rem;border-radius:.75rem;background:var(--dr-field);max-width:30rem}' +
+		'.dr-std-list label{display:flex;align-items:flex-start;gap:.5rem;padding:.25rem 0;color:var(--cv-name);cursor:pointer}' +
+		'.dr-std-list label span{display:block;color:var(--cv-meta);font-size:.6875rem}' +
+		'.dr-std-list input{margin-top:.2rem}' +
+		'.dr-rot{font-size:.6875rem;color:var(--cv-meta)}' +
+		'.dr-checks{display:flex;gap:.25rem;flex-wrap:wrap;margin:0 0 .375rem}' +
+		'.dr-ck{font-size:.6875rem;padding:0 .375rem;border-radius:.375rem;cursor:help}' +
+		'.dr-ck.ok{background:var(--cv-ok-bg);color:var(--cv-ok-fg)}' +
+		'.dr-ck.no{background:var(--cv-warn-bg);color:var(--cv-warn-fg)}' +
+		'.dr-q{margin:.625rem 0}' +
+		'.dr-q b{display:block;font-size:.8125rem;font-weight:500;margin:0 0 .125rem}' +
 		'.dr-cell{display:flex;flex-direction:column;gap:.125rem;min-width:0}' +
 		'.dr-num{padding:.375rem .625rem;border-radius:.75rem;-moz-appearance:textfield}' +
 		'.dr-notes{margin:.5rem 0 0}' +
@@ -169,7 +201,7 @@
 		'.dr-gutter{position:absolute;left:0;top:0;bottom:0;width:2.25rem;overflow:hidden;pointer-events:none;border-radius:1rem 0 0 1rem}' +
 		'.dr-gutter>span{position:absolute;right:.375rem;font-size:.6875rem;color:var(--cv-meta);opacity:.8;font-variant-numeric:tabular-nums;user-select:none}' +
 		'.dr-lnmirror{position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;white-space:pre-wrap;overflow-wrap:break-word;height:auto!important;resize:none}' +
-		'@media (max-width:767px){.dr-col{padding-bottom:5rem}.dr-grid{grid-template-columns:repeat(2,1fr)}}';
+		'@media (max-width:767px){.dr-col{padding-bottom:5rem}.dr-grid{grid-template-columns:repeat(2,1fr)}.dr-set{margin-left:0}}';
 
 	/* ------------------------------------------------------------ build */
 	function build(host) {
@@ -233,7 +265,7 @@
 		return api('GET', '/ideas').then(function (d) {
 			S.ideas = d.ideas || [];
 			S.loadingList = false;
-			if (S.tab === 'scratchpad' && !S.idea) renderIdeas();
+			if (S.tab === 'scratchpad' && !S.idea) { renderIdeas(); if (els.settings) els.settings.refreshHint(); }
 		}).catch(function (err) {
 			S.loadingList = false;
 			if (!quiet && S.tab === 'scratchpad' && !S.idea) { S.listError = err.message; renderIdeas(); }
@@ -279,18 +311,19 @@
 
 		els.notes = notesBox(S.notesDraft || '', function (v) { S.notesDraft = v; });
 		m.appendChild(els.notes.wrap);
+		els.settings = settingsBox(S.setDraft || {}, function (v) { S.setDraft = v; });
+		m.appendChild(els.settings.wrap);
 
 		var row = e('div', 'dr-row');
 		els.count = e('span', 'dr-hint');
 		row.appendChild(els.count);
 		row.appendChild(e('span', 'dr-spacer'));
 		els.save = btn('Save for later', '', function () { createIdea(false); });
-		els.draft = btn('Draft it', 'primary', function () { createIdea(true); });
-		els.draftV2 = btn('Draft with V2', 'secondary', function () { createIdea(true, true); });
-		els.draftV2.title = 'Runs 12 variants — 6 with current prompts (V1) and 6 with the new comment-first prompts (V2) — then scores both with the same rubric. Takes ~2-3 min.';
+		els.draft = btn('Draft it', 'primary', function () { createIdea(true, 'v3'); });
+		els.draftV2 = btn('Draft with V2', 'secondary', function () { createIdea(true, 'v2'); });
 		row.appendChild(els.save);
-		row.appendChild(els.draft);
 		row.appendChild(els.draftV2);
+		row.appendChild(els.draft);
 		m.appendChild(row);
 		els.composerErr = e('div', 'dr-err');
 		els.composerErr.hidden = true;
@@ -313,8 +346,85 @@
 		els.save.disabled = !ok;
 		els.draft.disabled = !ok || busy || offline;
 		els.draftV2.disabled = !ok || busy || offline;
-		els.draft.title = busy ? 'Another draft is being written; wait for it to finish.' : offline ? 'The LLM gateway is offline.' : (ok ? '' : 'Write at least 10 characters.');
-		els.draftV2.title = busy ? 'Another draft is being written; wait for it to finish.' : offline ? 'The LLM gateway is offline.' : (ok ? 'Runs 12 variants — 6 with current prompts (V1) and 6 with the new comment-first prompts (V2) — then scores both with the same rubric. Takes ~2-3 min.' : 'Write at least 10 characters.');
+		var why = busy ? 'Another draft is being written; wait for it to finish.' : offline ? 'The LLM gateway is offline.' : (ok ? '' : 'Write at least 10 characters.');
+		els.draft.title = why || 'V3 (Sonnet): plans first and may ask you up to 3 questions, then writes 3 English drafts, checks them against your standards, fixes what fails, and adds a German version and a first comment. About a minute.';
+		els.draftV2.title = why || 'The older V2 tournament: 12 variants scored by simulated personas. Kept for comparison for a few weeks.';
+	}
+
+	/* ------------------------------------------------------------ V3 settings: audience, post type, standards */
+	function selectBox(list, value, aria) {
+		var s = document.createElement('select');
+		s.setAttribute('aria-label', aria);
+		list.forEach(function (o) {
+			var op = document.createElement('option');
+			op.value = o[0]; op.textContent = o[1];
+			s.appendChild(op);
+		});
+		s.value = value || 'auto';
+		return s;
+	}
+
+	/* "Last posted: Build in public x3" so the three post types keep rotating. Uses the idea list (posted_at + post_type). */
+	function rotationHint() {
+		var posted = (S.ideas || []).filter(function (i) { return i.posted_at && i.post_type && i.post_type !== 'auto'; })
+			.sort(function (a, b) { return b.posted_at - a.posted_at; }).slice(0, 3);
+		if (!posted.length) return '';
+		var last = posted[0].post_type, n = 0;
+		while (n < posted.length && posted[n].post_type === last) n++;
+		var txt = 'Last posted: ' + label(POST_TYPES, last) + (n > 1 ? ' ×' + n : '');
+		if (n >= 2) {
+			var other = POST_TYPES.filter(function (t) { return t[0] !== 'auto' && t[0] !== last; }).map(function (t) { return t[1]; });
+			txt += ' · time for ' + other.join(' or ');
+		}
+		return txt;
+	}
+
+	function settingsBox(init, onChange) {
+		var wrap = e('div', 'dr-set');
+		var aud = selectBox(AUDIENCES, init.audience, 'Who this post is for');
+		var typ = selectBox(POST_TYPES, init.post_type, 'Post type');
+		var la = e('label'); la.appendChild(document.createTextNode('For')); la.appendChild(aud);
+		var lt = e('label'); lt.appendChild(document.createTextNode('Type')); lt.appendChild(typ);
+		wrap.appendChild(la);
+		wrap.appendChild(lt);
+
+		var on = {};
+		var std0 = init.standards || STANDARDS.map(function (s) { return s[0]; });
+		STANDARDS.forEach(function (s) { on[s[0]] = std0.indexOf(s[0]) !== -1; });
+		var det = e('details', 'dr-std');
+		var sum = e('summary');
+		det.appendChild(sum);
+		var list = e('div', 'dr-std-list');
+		list.appendChild(e('div', 'dr-hint', 'Every V3 draft is checked against these and fixed once if it fails. Untick one for this post only.'));
+		STANDARDS.forEach(function (s) {
+			var l = e('label');
+			var cb = document.createElement('input');
+			cb.type = 'checkbox'; cb.checked = on[s[0]];
+			cb.addEventListener('change', function () { on[s[0]] = cb.checked; changed(); });
+			l.appendChild(cb);
+			var t = e('div');
+			t.appendChild(document.createTextNode(s[1]));
+			t.appendChild(e('span', null, s[2]));
+			l.appendChild(t);
+			list.appendChild(l);
+		});
+		det.appendChild(list);
+		wrap.appendChild(det);
+		var rot = e('span', 'dr-rot', rotationHint());
+		wrap.appendChild(rot);
+
+		function get() {
+			return { audience: aud.value, post_type: typ.value, standards: STANDARDS.filter(function (s) { return on[s[0]]; }).map(function (s) { return s[0]; }) };
+		}
+		function changed() {
+			var v = get();
+			sum.textContent = 'Standards ' + v.standards.length + '/' + STANDARDS.length + ' ▾';
+			onChange && onChange(v);
+		}
+		aud.addEventListener('change', changed);
+		typ.addEventListener('change', changed);
+		sum.textContent = 'Standards ' + STANDARDS.filter(function (s) { return on[s[0]]; }).length + '/' + STANDARDS.length + ' ▾';
+		return { wrap: wrap, get: get, refreshHint: function () { rot.textContent = rotationHint(); } };
 	}
 
 	/* ------------------------------------------------------------ notes for the agent */
@@ -442,16 +552,17 @@
 		return { wrap: wrap, ta: ta, set: function (v) { ta.value = v || ''; changed(); } };
 	}
 
-	function createIdea(runNow, v2) {
+	function createIdea(runNow, engine) {
 		var text = els.input.value.trim();
 		var notes = els.notes.ta.value.trim();
+		var set = els.settings.get();
 		els.composerErr.hidden = true;
 		els.save.disabled = els.draft.disabled = els.draftV2.disabled = true;
-		api('POST', '/ideas', { text: text, notes: notes }).then(function (d) {
+		api('POST', '/ideas', { text: text, notes: notes, audience: set.audience, post_type: set.post_type, standards: set.standards }).then(function (d) {
 			if (notes) { try { localStorage.setItem('dr-last-notes', notes); } catch (x) { /* storage blocked */ } }
-			S.notesDraft = '';
+			S.notesDraft = ''; S.setDraft = null;
 			if (!runNow) { els.input.value = ''; autosize(els.input); els.notes.set(''); updateComposerState(); return loadList(); }
-			return startRun(d.id, v2).then(function () { els.input && (els.input.value = ''); });
+			return startRun(d.id, engine).then(function () { els.input && (els.input.value = ''); });
 		}).catch(function (err) {
 			els.composerErr.textContent = err.message;
 			els.composerErr.hidden = false;
@@ -459,8 +570,8 @@
 		});
 	}
 
-	function startRun(ideaId, v2) {
-		return api('POST', '/ideas/' + ideaId + '/run', { v2: !!v2 }).then(function () { return openIdea(ideaId); });
+	function startRun(ideaId, engine) {
+		return api('POST', '/ideas/' + ideaId + '/run', { engine: engine || 'v3' }).then(function () { return openIdea(ideaId); });
 	}
 
 	function renderIdeas() {
@@ -473,7 +584,7 @@
 			var em = e('div', 'cv-empty');
 			em.style.minHeight = '12rem';
 			em.appendChild(e('b', null, 'No ideas yet'));
-			em.appendChild(e('span', null, 'Dump a raw idea above and press Draft it. The best of six simulated drafts comes back in about a minute.'));
+			em.appendChild(e('span', null, 'Dump a raw idea above and press Draft it. V3 plans the post, may ask you a few questions, then writes it in English and German in about a minute.'));
 			L.appendChild(em);
 			return;
 		}
@@ -487,11 +598,14 @@
 			var nm = e('div', 'cv-name', i.text.replace(/\s+/g, ' ').slice(0, 140));
 			l1.appendChild(nm);
 			main.appendChild(l1);
-			var meta = ago(i.updated_at) + (i.notes ? ' · with notes' : '') + (st === 'running' ? ' · ' + (i.run.step || 'working') : st === 'failed' ? ' · failed' : st === 'new' ? ' · not drafted yet' : '');
+			var meta = ago(i.updated_at) + (i.audience && i.audience !== 'auto' ? ' · for ' + label(AUDIENCES, i.audience) : '') +
+				(i.notes ? ' · with notes' : '') + (st === 'running' ? ' · ' + (i.run.step || 'working') : st === 'failed' ? ' · failed' :
+				st === 'needs_input' ? ' · waiting for your answers' : st === 'new' ? ' · not drafted yet' : '');
 			main.appendChild(e('div', 'cv-when', meta));
 			row.appendChild(main);
 			if (i.posted) row.appendChild(e('span', 'dr-badge-ok', 'Posted'));
 			if (st === 'running') row.appendChild(e('span', 'dr-badge', 'Drafting…'));
+			if (st === 'needs_input') row.appendChild(e('span', 'dr-flag', 'Needs answers'));
 			if (st === 'failed') row.appendChild(e('span', 'cv-badge fail', 'Failed'));
 			var open = function () { openIdea(i.id); };
 			row.addEventListener('click', open);
@@ -534,12 +648,12 @@
 		var top = e('div', 'dr-row');
 		top.appendChild(btn('← Scratchpad', 'dr-back', function () { stopRunPoll(); S.idea = null; S.run = null; render(); loadList(); }));
 		top.appendChild(e('span', 'dr-spacer'));
-		var running = S.run && S.run.status === 'running';
+		var running = S.run && (S.run.status === 'running' || S.run.status === 'needs_input');
 		var again = btn(S.run ? 'Draft again' : 'Draft it', 'primary', function () {
 			again.disabled = true;
-			/* unsaved idea/notes edits go in first, so the new run uses what is on screen */
+			/* unsaved idea/notes/settings edits go in first, so the new run uses what is on screen */
 			(sv.hidden ? Promise.resolve() : saveIdea())
-				.then(function () { return startRun(idea.id); })
+				.then(function () { return startRun(idea.id, 'v3'); })
 				.catch(function (err) { again.disabled = false; flashError(err.message); });
 		});
 		again.disabled = !!running || (S.status && S.status.busy && !running);
@@ -564,19 +678,26 @@
 		ta.style.marginTop = '.25rem';
 		setTimeout(function () { autosize(ta); }, 0);
 		idea.notes = idea.notes || '';
-		function dirty() { return ta.value.trim() !== idea.text || nb.ta.value.trim() !== idea.notes; }
+		function setKey(v) { return v.audience + '|' + v.post_type + '|' + v.standards.join(','); }
+		var set0 = setKey({ audience: idea.audience || 'auto', post_type: idea.post_type || 'auto', standards: idea.standards || STANDARDS.map(function (s) { return s[0]; }) });
+		function dirty() { return ta.value.trim() !== idea.text || nb.ta.value.trim() !== idea.notes || setKey(sb.get()) !== set0; }
 		ta.addEventListener('input', function () { autosize(ta); sv.hidden = !dirty(); });
 		var nb = notesBox(idea.notes, function () { sv.hidden = !dirty(); });
+		var sb = settingsBox({ audience: idea.audience, post_type: idea.post_type, standards: idea.standards }, function () { sv.hidden = !dirty(); });
 		function saveIdea() {
-			var body = { text: ta.value, notes: nb.ta.value };
+			var set = sb.get();
+			var body = { text: ta.value, notes: nb.ta.value, audience: set.audience, post_type: set.post_type, standards: set.standards };
 			return api('PUT', '/ideas/' + idea.id, body).then(function () {
-				idea.text = body.text.trim(); idea.notes = body.notes.trim(); sv.hidden = true;
+				idea.text = body.text.trim(); idea.notes = body.notes.trim();
+				idea.audience = set.audience; idea.post_type = set.post_type; idea.standards = set.standards;
+				set0 = setKey(set); sv.hidden = true;
 			});
 		}
 		var sv = btn('Save changes', '', function () { saveIdea().catch(function (err) { flashError(err.message); }); });
 		sv.hidden = true;
 		card.appendChild(ta);
 		card.appendChild(nb.wrap);
+		card.appendChild(sb.wrap);
 		card.appendChild(sv);
 		m.appendChild(card);
 
@@ -595,7 +716,8 @@
 		var box = els.runBox;
 		box.textContent = '';
 		var r = S.run;
-		if (!r) { box.appendChild(e('div', 'dr-note', 'Not drafted yet. Press Draft it to write six variants and pick the best.')); return; }
+		if (!r) { box.appendChild(e('div', 'dr-note', 'Not drafted yet. Press Draft it: V3 plans the post, may ask you a few questions, then writes it in English and German.')); return; }
+		if (r.status === 'needs_input') return renderQuestions(box, r);
 		if (r.status === 'running') {
 			var c = e('div', 'dr-card');
 			c.appendChild(e('h4', null, 'Drafting…'));
@@ -636,7 +758,8 @@
 	function updateProgress() {
 		var r = S.run;
 		if (!r || !els.stepList) return;
-		var steps = (r.v2 ? ['Writing 12 variants (6 V1 + 6 V2)', 'Checking drafts', 'Simulating audience reactions', 'Final matchups', 'Polishing the winner'] : STEPS);
+		var steps = r.engine === 'v3' ? STEPS_V3 :
+			(r.v2 ? ['Writing 12 variants (6 V1 + 6 V2)', 'Checking drafts', 'Simulating audience reactions', 'Final matchups', 'Polishing the winner'] : STEPS);
 		var idx = Math.max(0, steps.indexOf(r.step));
 		els.stepList.textContent = '';
 		steps.forEach(function (name, i) {
@@ -649,6 +772,128 @@
 		els.runMeta.textContent = r.calls + ' of ' + r.max_calls + ' model calls · $' + r.cost_usd.toFixed(4) + ' · usually 1–2 minutes';
 	}
 
+	/* ------------------------------------------------------------ V3: plan + questions before writing */
+	function planCard(r, open) {
+		var p = (r.meta && r.meta.plan) || {};
+		var det = e('details', 'dr-det');
+		det.open = !!open;
+		det.appendChild(e('summary', null, "V3's plan · for " + label(AUDIENCES, r.meta.audience) + ' · ' + label(POST_TYPES, r.meta.post_type)));
+		var c = e('div', 'dr-card');
+		if (p.reasoning) c.appendChild(e('div', 'dr-react', p.reasoning));
+		if (p.core_line) {
+			var cl = e('div', 'dr-react');
+			cl.appendChild(e('b', null, 'Core line: '));
+			cl.appendChild(document.createTextNode(p.core_line));
+			c.appendChild(cl);
+		}
+		if (p.ending_question) c.appendChild(e('div', 'dr-hint', 'Closing question idea: ' + p.ending_question));
+		(r.meta.answers || []).forEach(function (a) {
+			c.appendChild(e('div', 'dr-hint', a.ask + ' → ' + (a.answer || '(skipped)')));
+		});
+		det.appendChild(c);
+		return det;
+	}
+
+	function renderQuestions(box, r) {
+		var qs = (r.meta && r.meta.plan && r.meta.plan.questions) || [];
+		box.appendChild(planCard(r, true));
+		var c = e('div', 'dr-card');
+		c.appendChild(e('h4', null, 'Before writing, V3 wants to know'));
+		c.appendChild(e('div', 'dr-hint', 'Real details make the post. Answer what you can and leave the rest empty: V3 will write around a gap instead of inventing it.'));
+		var inputs = qs.map(function (q, i) {
+			var w = e('div', 'dr-q');
+			w.appendChild(e('b', null, (i + 1) + '. ' + q.ask));
+			if (q.why) w.appendChild(e('div', 'dr-hint', q.why));
+			var t = e('textarea', 'dr-input');
+			t.rows = 2; t.maxLength = 800;
+			t.setAttribute('aria-label', q.ask);
+			t.style.marginTop = '.25rem';
+			t.addEventListener('input', function () { autosize(t); });
+			w.appendChild(t);
+			c.appendChild(w);
+			return t;
+		});
+		var row = e('div', 'dr-row');
+		function send(skipAll) {
+			go.disabled = skip.disabled = true;
+			var answers = inputs.map(function (t) { return skipAll ? '' : t.value.trim(); });
+			api('POST', '/runs/' + r.id + '/answers', { answers: answers }).then(function () { return api('GET', '/runs/' + r.id); })
+				.then(function (x) { S.run = x; renderDetail(); startRunPoll(); })
+				.catch(function (err) { go.disabled = skip.disabled = false; flashError(err.message); });
+		}
+		var go = btn('Write the post', 'primary', function () { send(false); });
+		var skip = btn('Skip all and write', '', function () { send(true); });
+		row.appendChild(go);
+		row.appendChild(skip);
+		row.appendChild(e('span', 'dr-spacer'));
+		row.appendChild(btn('Cancel', 'danger', function () {
+			api('POST', '/runs/' + r.id + '/cancel').then(function () { return api('GET', '/runs/' + r.id); })
+				.then(function (x) { S.run = x; renderDetail(); }).catch(function (err) { flashError(err.message); });
+		}));
+		c.appendChild(row);
+		box.appendChild(c);
+		if (inputs[0]) setTimeout(function () { inputs[0].focus(); }, 0);
+	}
+
+	/* ------------------------------------------------------------ V3 results: EN + DE + first comment */
+	function checkChips(d) {
+		var ch = e('div', 'dr-checks');
+		STANDARDS.forEach(function (s) {
+			var c = d.checks && d.checks[s[0]];
+			if (!c) return;
+			var chip = e('span', 'dr-ck ' + (c.pass ? 'ok' : 'no'), (c.pass ? '✓ ' : '✗ ') + s[1]);
+			chip.title = c.why || s[2];
+			ch.appendChild(chip);
+		});
+		return ch;
+	}
+
+	function renderV3Results(box, r) {
+		var en = r.drafts.filter(function (d) { return d.lang !== 'de'; }).sort(function (a, b) { return (a.rank || 99) - (b.rank || 99); });
+		var de = r.drafts.filter(function (d) { return d.lang === 'de'; })[0];
+		box.appendChild(planCard(r, false));
+		var pairs = [['English', en[0]], ['Deutsch', de]];
+		pairs.forEach(function (pr) {
+			if (!pr[1]) return;
+			box.appendChild(e('div', 'dr-sec', pr[0]));
+			var best = draftCard(pr[1], r, true);
+			box.appendChild(best);
+			if (pr[1].reaction) {
+				var re = e('div', 'dr-react');
+				re.appendChild(e('b', null, label(AUDIENCES, r.meta.audience) + ' reader: '));
+				re.appendChild(document.createTextNode(pr[1].reaction));
+				box.appendChild(re);
+			}
+			box.appendChild(correctionCard(pr[1], best));
+		});
+		var fc = r.meta && r.meta.first_comment;
+		if (fc && (fc.en || fc.de)) {
+			box.appendChild(e('div', 'dr-sec', 'First comment'));
+			var c = e('div', 'dr-card');
+			c.appendChild(e('div', 'dr-hint', 'Post this as the first comment right after publishing. The link lives here, not in the post, because links in the post body cost reach. Add your real URL in Profile & audience (section LINK) if it shows [link].'));
+			[['EN', fc.en], ['DE', fc.de]].forEach(function (x) {
+				if (!x[1]) return;
+				var row = e('div', 'dr-row');
+				row.appendChild(e('span', 'dr-badge', x[0]));
+				var t = e('span', 'dr-react', x[1]);
+				t.style.flex = '1';
+				row.appendChild(t);
+				row.appendChild(btn('Copy', '', function (ev) { copyText(x[1], ev.currentTarget); }));
+				c.appendChild(row);
+			});
+			box.appendChild(c);
+		}
+		if (en.length > 1) {
+			box.appendChild(e('div', 'dr-sec', 'Other English drafts'));
+			en.slice(1).forEach(function (d) {
+				var det = draftDetails(d, false);
+				det.querySelector('.dr-card').insertBefore(checkChips(d), det.querySelector('.dr-card').firstChild);
+				box.appendChild(det);
+			});
+		}
+		box.appendChild(e('div', 'dr-note', (r.summary && r.summary.disclaimer) || ''));
+	}
+
 	function renderResults(box, r) {
 		var ranked = r.drafts.filter(function (d) { return d.rank; });
 		var others = r.drafts.filter(function (d) { return !d.rank; });
@@ -659,7 +904,8 @@
 			used.appendChild(document.createTextNode(r.notes));
 			box.appendChild(used);
 		}
-		if (r.v2) { renderCompareResults(box, r, ranked, others); }
+		if (r.engine === 'v3') { renderV3Results(box, r); }
+		else if (r.v2) { renderCompareResults(box, r, ranked, others); }
 		else { renderSingleResults(box, r, ranked, others); }
 		box.appendChild(e('div', 'dr-hint', r.calls + ' model calls · $' + r.cost_usd.toFixed(4) + ' · finished ' + ago(r.finished_at)));
 	}
@@ -753,8 +999,10 @@
 		h.appendChild(e('span', 'dr-badge-ok', 'Best draft'));
 		h.appendChild(e('span', 'dr-badge', ANGLE_LABELS[d.angle] || d.angle));
 		if (d.posted_at) h.appendChild(e('span', 'dr-badge', 'Posted'));
-		h.appendChild(e('span', 'dr-score', Math.round(d.score) + ' / 100 simulated'));
+		if (r.engine === 'v3') h.appendChild(e('span', 'dr-score', d.score10 != null ? d.score10 + ' / 10 as the reader' : ''));
+		else h.appendChild(e('span', 'dr-score', Math.round(d.score) + ' / 100 simulated'));
 		c.appendChild(h);
+		if (d.checks) c.appendChild(checkChips(d));
 		var ta = e('textarea', 'dr-input');
 		ta.value = showOriginal[d.id] ? d.text : bestText(d);
 		ta.setAttribute('aria-label', 'Best draft text');
@@ -856,9 +1104,9 @@
 			d.flags.forEach(function (f) { ch.appendChild(e('span', 'dr-flag', f)); });
 			b.appendChild(ch);
 		}
-		b.appendChild(e('div', 'dr-pre', d.text));
+		b.appendChild(e('div', 'dr-pre', d.polished_text || d.text));
 		var row = e('div', 'dr-row');
-		row.appendChild(btn('Copy', '', function (ev) { copyText(d.text, ev.currentTarget); }));
+		row.appendChild(btn('Copy', '', function (ev) { copyText(d.polished_text || d.text, ev.currentTarget); }));
 		b.appendChild(row);
 		det.appendChild(b);
 		return det;
@@ -1031,7 +1279,7 @@
 		var thisWeek = btn('This week', '', function () { renderReview(); });
 		nav.appendChild(thisWeek);
 		m.appendChild(nav);
-		m.appendChild(e('div', 'dr-note', 'Drop the real numbers from LinkedIn for each post you published. The more honestly you note who engaged, the better the next drafts get.'));
+		m.appendChild(e('div', 'dr-note', 'Drop the real numbers from LinkedIn for each post you published. DMs, signups and profile visits matter more than likes, and noting who engaged makes the next drafts better.'));
 
 		var anyResults = false;
 		if (!w.posts.length) {
@@ -1042,7 +1290,7 @@
 			m.appendChild(em);
 		}
 		w.posts.forEach(function (p) {
-			if (p.review && (p.review.impressions != null || p.review.reactions != null || p.review.comments != null || p.review.reposts != null)) anyResults = true;
+			if (p.review && (p.review.impressions != null || p.review.reactions != null || p.review.comments != null || p.review.reposts != null || p.review.dms != null || p.review.signups != null)) anyResults = true;
 			m.appendChild(reviewCard(p, function () { anyResults = true; analyze.disabled = false; }));
 		});
 
@@ -1109,6 +1357,8 @@
 		var c = e('div', 'dr-card');
 		var h = e('h4');
 		h.appendChild(e('span', 'dr-badge', ANGLE_LABELS[p.angle] || p.angle));
+		if (p.audience) h.appendChild(e('span', 'dr-badge', 'for ' + label(AUDIENCES, p.audience)));
+		if (p.post_type) h.appendChild(e('span', 'dr-badge', label(POST_TYPES, p.post_type)));
 		if (p.sim_score != null) h.appendChild(e('span', 'dr-badge', Math.round(p.sim_score) + ' / 100 simulated'));
 		h.appendChild(e('span', 'dr-score', 'Posted ' + new Date(p.posted_at * 1000).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })));
 		c.appendChild(h);
@@ -1122,7 +1372,7 @@
 		var rv = p.review || {};
 		var grid = e('div', 'dr-grid');
 		var fields = {};
-		[['impressions', 'Impressions'], ['reactions', 'Reactions'], ['comments', 'Comments'], ['reposts', 'Reposts'], ['profile_views', 'Profile views']].forEach(function (f) {
+		[['impressions', 'Impressions'], ['reactions', 'Reactions'], ['comments', 'Comments'], ['reposts', 'Reposts'], ['profile_views', 'Profile views'], ['dms', 'DMs'], ['signups', 'Signups']].forEach(function (f) {
 			var cell = e('label', 'dr-cell');
 			cell.appendChild(e('span', 'dr-hint', f[1]));
 			var inp = document.createElement('input');
